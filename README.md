@@ -53,8 +53,11 @@ nix develop --command zig build smoke-virt
 Run host-native tests:
 
 ```sh
-nix develop --command zig build test
+nix develop --command zig build test --summary all
 ```
+
+The full summary prints the number of executed tests; Zig otherwise produces no
+test-runner output when every test passes.
 
 The current Phase 1 checkpoint emits `BOOT:OK`, exercises a deliberate panic
 marker, and then halts. QEMU is terminated automatically by the smoke-test
