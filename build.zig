@@ -49,6 +49,10 @@ pub fn build(b: *std.Build) void {
             .target = b.graph.host,
             .optimize = optimize,
         }),
+        .test_runner = .{
+            .path = b.path("test_runner.zig"),
+            .mode = .simple,
+        },
     });
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&b.addRunArtifact(native_tests).step);
