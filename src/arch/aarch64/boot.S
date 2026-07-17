@@ -16,6 +16,9 @@ _start:
     ldr x1, =__stack_top
     mov sp, x1
     mov x0, x19
+    mrs x1, CurrentEL
+    lsr x1, x1, #2
+    mrs x2, MPIDR_EL1
     bl kernelMain
 
 3:

@@ -1,7 +1,11 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Prioritize performance, safety, or binary size",
+    ) orelse .ReleaseSmall;
     const kernel_target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
         .os_tag = .freestanding,
@@ -14,6 +18,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = kernel_target,
             .optimize = optimize,
+            .strip = false,
         }),
     });
     kernel.entry = .{ .symbol_name = "_start" };
@@ -31,6 +36,12 @@ pub fn build(b: *std.Build) void {
 
     addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", kernel, false);
     addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", kernel, true);
+
+    const smoke = b.addSystemCommand(&.{"bash"});
+    smoke.addFileArg(b.path("scripts/smoke-virt.sh"));
+    smoke.addFileArg(kernel.getEmittedBin());
+    const smoke_step = b.step("smoke-virt", "Boot QEMU and verify the serial marker");
+    smoke_step.dependOn(&smoke.step);
 
     const native_tests = b.addTest(.{
         .root_module = b.createModule(.{

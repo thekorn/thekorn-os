@@ -32,6 +32,7 @@
       default = pkgs.mkShell {
         packages = [
           pkgs.codebook
+          pkgs.coreutils
           pkgs.jq
           pkgs.qemu
           pkgs.zigpkgs."master-2026-07-16"

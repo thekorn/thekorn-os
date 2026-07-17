@@ -12,3 +12,6 @@ nix develop --command zig build test
 
 Do not invoke `zig` directly from the host environment. When adding or changing
 verification commands, keep them reproducible through `nix develop --command`.
+
+Keep `README.md` current whenever build commands, run/debug workflows, generated
+artifacts, requirements, or implementation phase status change.

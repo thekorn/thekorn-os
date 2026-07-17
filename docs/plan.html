@@ -260,7 +260,7 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: proposed</span>
+            <span class="meta">Status: implementation in progress · phases 0–1 complete</span>
             <span class="meta">Updated: 2026-07-17</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> it is still the stock hosted Zig executable/library template. Phase 0 deliberately replaces the hosted entry point and native target with a freestanding AArch64 kernel build, while preserving host-native unit tests as a separate build path.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0 and 1 are complete. The project now builds a symbol-rich freestanding AArch64 ELF and <code>kernel8.img</code>, boots through <code>_start</code> into Zig on QEMU <code>virt</code>, reports boot facts over PL011, and verifies deterministic boot and panic markers with a timeout-bounded smoke test. Host-native unit tests remain a separate build path.</p>
         </section>
 
         <section id="strategy">
@@ -369,11 +369,11 @@
           <div class="timeline">
             <article class="milestone foundation">
               <div class="phase-label">Phase 0</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><h3>Freestanding build and reproducible toolchain</h3><p>Pin the Zig development snapshot in Nix, resolve an <code>aarch64-freestanding-none</code> target, add a linker script at <code>0x80000</code>, put <code>_start</code> first, create a 16-byte-aligned stack, clear BSS, preserve the DTB pointer from <code>x0</code>, and emit both symbol-rich ELF and <code>kernel8.img</code>. Use small external assembly files only where exact instruction layout matters.</p><div class="tags"><span class="tag">build.zig</span><span class="tag">linker.ld</span><span class="tag">boot.S</span><span class="tag">flake.nix</span></div><div class="exit"><strong>Exit:</strong> QEMU reaches Zig <code>kernelMain</code>; GDB resolves symbols and can break at <code>_start</code>.</div></div>
+              <div class="milestone-body"><span class="status recommended">Complete · 3e5c91e</span><h3>Freestanding build and reproducible toolchain</h3><p>Pin the Zig development snapshot in Nix, resolve an <code>aarch64-freestanding-none</code> target, add a linker script at <code>0x80000</code>, put <code>_start</code> first, create a 16-byte-aligned stack, clear BSS, preserve the DTB pointer from <code>x0</code>, and emit both symbol-rich ELF and <code>kernel8.img</code>. Use small external assembly files only where exact instruction layout matters.</p><div class="tags"><span class="tag">build.zig</span><span class="tag">linker.ld</span><span class="tag">boot.S</span><span class="tag">flake.nix</span></div><div class="exit"><strong>Exit verified:</strong> QEMU reaches Zig <code>kernelMain</code>; LLDB resolves symbols and breaks at <code>_start</code> and <code>kernelMain</code>.</div></div>
             </article>
             <article class="milestone foundation">
               <div class="phase-label">Phase 1</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><h3>Polled console, panic, and boot facts</h3><p>Implement QEMU PL011 using volatile 32-bit MMIO. Add tiny formatting and panic paths that do not allocate. Print <code>CurrentEL</code>, <code>MPIDR_EL1</code>, DTB pointer, and linker boundaries.</p><div class="tags"><span class="tag">uart</span><span class="tag">mmio</span><span class="tag">panic</span></div><div class="exit"><strong>Exit:</strong> every boot and deliberate panic produces a deterministic serial marker before halting.</div></div>
+              <div class="milestone-body"><span class="status recommended">Complete</span><h3>Polled console, panic, and boot facts</h3><p>Implement QEMU PL011 using volatile 32-bit MMIO. Add tiny formatting and panic paths that do not allocate. Print <code>CurrentEL</code>, <code>MPIDR_EL1</code>, DTB pointer, and linker boundaries.</p><div class="tags"><span class="tag">uart</span><span class="tag">mmio</span><span class="tag">panic</span></div><div class="exit"><strong>Exit verified:</strong> <code>smoke-virt</code> enforces a five-second timeout and observes deterministic <code>BOOT:OK</code> and deliberate <code>PANIC:</code> serial markers before the kernel halts.</div></div>
             </article>
             <article class="milestone foundation">
               <div class="phase-label">Phase 2</div><div class="rail"><span class="dot"></span></div>
