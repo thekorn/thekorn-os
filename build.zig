@@ -12,21 +12,14 @@ pub fn build(b: *std.Build) void {
         .abi = .none,
     });
 
-    const kernel = b.addExecutable(.{
-        .name = "thekorn_os",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = kernel_target,
-            .optimize = optimize,
-            .strip = false,
-        }),
-    });
-    kernel.entry = .{ .symbol_name = "_start" };
-    kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/boot.S"));
-    kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
+    const kernel = addKernel(b, "thekorn_os", kernel_target, optimize);
+    kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
+
+    const rpi_kernel = addKernel(b, "thekorn_os_rpi4", kernel_target, optimize);
+    rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
 
     const install_elf = b.addInstallArtifact(kernel, .{});
-    const image = kernel.addObjCopy(.{
+    const image = rpi_kernel.addObjCopy(.{
         .basename = "kernel8.img",
         .format = .binary,
     });
@@ -56,6 +49,27 @@ pub fn build(b: *std.Build) void {
     });
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&b.addRunArtifact(native_tests).step);
+}
+
+fn addKernel(
+    b: *std.Build,
+    name: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    const kernel = b.addExecutable(.{
+        .name = name,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = false,
+        }),
+    });
+    kernel.entry = .{ .symbol_name = "_start" };
+    kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/boot.S"));
+    kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/vectors.S"));
+    return kernel;
 }
 
 fn addQemuStep(

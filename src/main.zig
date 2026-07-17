@@ -1,21 +1,43 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const uart = @import("platform/qemu_virt/uart.zig");
+const exceptions = @import("arch/aarch64/exceptions.zig");
 const Console = @import("kernel/console.zig").Console;
 const console = Console(uart.writeByte);
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
 
-pub export fn kernelMain(dtb: usize, current_el: usize, mpidr: usize) callconv(.c) noreturn {
+pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c) noreturn {
     uart.init();
     console.writeBootFacts(
         dtb,
-        current_el,
+        entry_el,
         mpidr,
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_start),
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_end),
     );
+    asm volatile ("brk #0");
+    console.write("EXCEPTION:RETURNED\n");
+    console.write("BOOT:OK\n");
+    halt();
+}
+
+pub export fn exceptionHandler(vector: usize, frame: *exceptions.Frame) callconv(.c) void {
+    console.writeHex("EXCEPTION:VECTOR=", vector);
+    console.writeHex("EXCEPTION:ESR=", frame.esr);
+    console.writeHex("EXCEPTION:EC=", exceptions.class(frame.esr));
+    console.writeHex("EXCEPTION:ELR=", frame.elr);
+    console.writeHex("EXCEPTION:SPSR=", frame.spsr);
+    console.writeHex("EXCEPTION:FAR=", frame.far);
+
+    if (vector == 4 and exceptions.class(frame.esr) == exceptions.breakpoint_class) {
+        console.write("EXCEPTION:BRK\n");
+        frame.elr += 4;
+        return;
+    }
+
+    console.write("EXCEPTION:UNHANDLED\n");
     halt();
 }
 
@@ -69,9 +91,7 @@ test "boot facts include padded hexadecimal addresses and completion markers" {
             "BOOT:MPIDR=0x0000000080000000\r\n" ++
             "BOOT:DTB=0x0000000040000000\r\n" ++
             "BOOT:KERNEL_START=0x0000000000080000\r\n" ++
-            "BOOT:KERNEL_END=0x0000000000091234\r\n" ++
-            "BOOT:OK\r\n" ++
-            "PANIC:phase 1 deliberate panic\r\n",
+            "BOOT:KERNEL_END=0x0000000000091234\r\n",
         test_output[0..test_output_len],
     );
 }

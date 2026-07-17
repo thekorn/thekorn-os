@@ -4,10 +4,12 @@
 project is developed QEMU-first and will progressively port the same kernel to
 the Raspberry Pi 4 (BCM2711).
 
-The current implementation boots a freestanding kernel at `0x80000`, clears
-BSS, creates a 16-byte-aligned stack, enters Zig, initializes the QEMU `virt`
-PL011 UART, and reports boot facts over serial. See [the implementation
-plan](docs/plan.html) for the roadmap and current phase status.
+The current implementation boots a freestanding kernel in writable QEMU
+`virt` RAM at `0x40080000` and produces a separately linked Raspberry Pi image
+for firmware loading at `0x80000`. It enters EL1h, installs a complete AArch64
+exception vector table, initializes the QEMU PL011 UART, and reports boot and
+exception facts over serial. See [the implementation plan](docs/plan.html) for
+the roadmap and current phase status.
 
 ## Requirements
 
@@ -27,8 +29,8 @@ nix develop --command zig build
 The default build uses `ReleaseSmall` code generation while retaining symbols
 and debug information in the ELF. It creates:
 
-- `zig-out/bin/thekorn_os` — symbol-rich AArch64 ELF for QEMU and debugging
-- `zig-out/kernel8.img` — raw Raspberry Pi kernel image
+- `zig-out/bin/thekorn_os` — symbol-rich QEMU `virt` ELF linked at `0x40080000`
+- `zig-out/kernel8.img` — raw Raspberry Pi kernel image linked at `0x80000`
 
 An optimization mode can be selected explicitly, for example:
 
@@ -62,9 +64,10 @@ summary and the five slowest tests. Set `TEST_VERBOSE=false` for compact output,
 run matching named tests. Tests named `tests:beforeAll` and `tests:afterAll` are
 run as suite setup and teardown hooks.
 
-The current Phase 1 checkpoint emits `BOOT:OK`, exercises a deliberate panic
-marker, and then halts. QEMU is terminated automatically by the smoke-test
-timeout.
+The current Phase 2 QEMU checkpoint emits `BOOT:OK`, handles a deliberate
+`brk` through the EL1h synchronous vector, reports ESR/ELR/SPSR/FAR, resumes
+after the trapped instruction, and then halts. QEMU is terminated automatically
+by the smoke-test timeout.
 
 ## Debug
 
@@ -84,5 +87,5 @@ and Zig source locations.
   raw image, QEMU run/debug steps
 - Phase 1: complete — QEMU PL011 serial output, boot facts, panic marker, and
   automated smoke test
-- Phase 2: next — EL1 exception vectors and the first Raspberry Pi 4 hardware
-  checkpoint
+- Phase 2: in progress — QEMU EL1 exception handling is implemented; the
+  Raspberry Pi 4 serial/exception hardware checkpoint remains

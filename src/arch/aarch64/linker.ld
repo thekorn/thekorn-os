@@ -2,11 +2,13 @@ ENTRY(_start)
 
 SECTIONS
 {
-    . = 0x80000;
+    . = DEFINED(KERNEL_BASE) ? KERNEL_BASE : 0x80000;
     __kernel_start = .;
 
-    .text : ALIGN(16) {
+    .text : ALIGN(2048) {
         KEEP(*(.text.boot))
+        . = ALIGN(2048);
+        KEEP(*(.text.vectors))
         *(.text .text.*)
     }
 
