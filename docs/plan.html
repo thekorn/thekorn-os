@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Implementation plan for a Zig AArch64 operating system targeting QEMU and Raspberry Pi 4.">
+  <title>thekorn-os — Zig ARM OS implementation plan</title>
+  <script>
+    (() => {
+      const saved = localStorage.getItem("plan-theme");
+      const dark = saved
+        ? saved === "dark"
+        : window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.classList.toggle("dark", dark);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --surface-muted: #f0eee6;
+      --text: #171715;
+      --text-secondary: #44423d;
+      --muted: #77746d;
+      --border: #d4d0c5;
+      --accent: #c96143;
+      --accent-soft: #f4ddd4;
+      --olive: #667b4d;
+      --olive-soft: #e4eadb;
+      --amber: #9a681f;
+      --amber-soft: #f4e7ca;
+      --code-bg: #171715;
+      --code-text: #ece9df;
+      --focus: #a8472d;
+      --serif: ui-serif, Georgia, "Times New Roman", serif;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    }
+
+    html.dark {
+      color-scheme: dark;
+      --bg: #171714;
+      --surface: #211f1b;
+      --surface-muted: #2b2924;
+      --text: #f0eee6;
+      --text-secondary: #d3d0c6;
+      --muted: #aaa69c;
+      --border: #48453e;
+      --accent: #e18a6e;
+      --accent-soft: #4a2e25;
+      --olive: #a1b584;
+      --olive-soft: #303a29;
+      --amber: #ddb86f;
+      --amber-soft: #493b22;
+      --code-bg: #0f0f0d;
+      --code-text: #eeeae0;
+      --focus: #ef9a7e;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      padding: 52px 32px 112px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.62;
+    }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    a:hover { text-decoration-thickness: 2px; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    .page { max-width: 1180px; margin: 0 auto; }
+    .topbar { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+    .eyebrow, .meta, .tag, .phase-label, .section-number, .file-label, .status, th {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+    .eyebrow { color: var(--accent); font-weight: 700; margin: 0 0 12px; }
+    h1, h2, h3 { margin-top: 0; }
+    h1 {
+      max-width: 790px;
+      margin-bottom: 14px;
+      font-family: var(--serif);
+      font-size: clamp(34px, 5vw, 50px);
+      line-height: 1.06;
+      font-weight: 500;
+      letter-spacing: -.025em;
+    }
+    .lede { max-width: 730px; color: var(--text-secondary); font-size: 17px; margin: 0 0 20px; }
+    .metadata { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); }
+    .theme-toggle {
+      min-width: 44px;
+      min-height: 44px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font: 600 13px var(--sans);
+      padding: 9px 13px;
+      white-space: nowrap;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 42px 0 50px;
+    }
+    .summary-card, .card, .decision, .definition, .diagram-panel, .note {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+    }
+    .summary-card { padding: 17px; }
+    .summary-card strong { display: block; margin: 5px 0 2px; font: 500 27px/1.1 var(--serif); }
+    .summary-card.primary strong { color: var(--accent); }
+    .summary-card span:last-child { color: var(--muted); font-size: 13px; }
+    .mobile-nav { display: none; margin: -22px 0 36px; gap: 8px; flex-wrap: wrap; }
+    .mobile-nav a {
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text-secondary);
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 225px; gap: 54px; align-items: start; }
+    .toc { position: sticky; top: 26px; border-left: 1.5px solid var(--border); padding: 6px 0 6px 18px; }
+    .toc strong { display: block; margin-bottom: 10px; }
+    .toc a { display: block; padding: 5px 8px; color: var(--muted); text-decoration: none; border-radius: 6px; font-size: 13px; }
+    .toc a:hover { color: var(--text); background: var(--accent-soft); }
+    section { margin-bottom: 60px; scroll-margin-top: 28px; }
+    .section-heading { display: flex; gap: 12px; align-items: baseline; margin-bottom: 8px; }
+    .section-number {
+      display: inline-grid;
+      place-items: center;
+      width: 31px;
+      height: 25px;
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface-muted);
+    }
+    h2 { margin-bottom: 0; font: 500 28px/1.2 var(--serif); letter-spacing: -.01em; }
+    h3 { margin-bottom: 7px; font-size: 17px; line-height: 1.35; }
+    .section-intro { max-width: 730px; margin: 0 0 26px 43px; color: var(--muted); }
+    .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .card { padding: 20px; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .card p { color: var(--text-secondary); }
+    ul { padding-left: 20px; }
+    li + li { margin-top: 6px; }
+    .tight li + li { margin-top: 3px; }
+    .success { border-top: 4px solid var(--olive); }
+    .boundary { border-top: 4px solid var(--accent); }
+    .note { padding: 17px 19px; background: var(--surface-muted); }
+    .note strong { color: var(--accent); }
+    .diagram-panel { padding: 22px; overflow-x: auto; }
+    .diagram-panel svg { display: block; min-width: 680px; width: 100%; height: auto; }
+    .diagram-panel .node { fill: var(--surface-muted); stroke: var(--border); stroke-width: 1.5; }
+    .diagram-panel .node-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+    .diagram-panel .node-hardware { fill: var(--olive-soft); stroke: var(--olive); stroke-width: 1.5; }
+    .diagram-panel .line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .diagram-panel text { fill: var(--text); font-family: var(--sans); font-size: 13px; }
+    .diagram-panel .small { fill: var(--muted); font-family: var(--mono); font-size: 10px; text-transform: uppercase; }
+    .caption { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 0 0 16px; color: var(--muted); font-size: 12px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 3px; border: 1px solid var(--border); }
+    .legend .portable { background: var(--accent-soft); border-color: var(--accent); }
+    .legend .platform { background: var(--olive-soft); border-color: var(--olive); }
+    .timeline { margin-top: 8px; }
+    .milestone { display: grid; grid-template-columns: 92px 28px minmax(0, 1fr); }
+    .phase-label { padding-top: 20px; color: var(--muted); text-align: right; }
+    .rail { position: relative; }
+    .rail::before { content: ""; position: absolute; top: 0; bottom: 0; left: 13px; width: 1.5px; background: var(--border); }
+    .milestone:first-child .rail::before { top: 24px; }
+    .milestone:last-child .rail::before { bottom: calc(100% - 25px); }
+    .dot { position: absolute; top: 22px; left: 8px; width: 11px; height: 11px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg); }
+    .milestone.foundation .dot { border-color: var(--olive); background: var(--olive-soft); }
+    .milestone-body { margin: 0 0 18px 10px; padding: 18px 20px; border: 1.5px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .milestone-body p { margin: 6px 0 11px; color: var(--text-secondary); }
+    .exit { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--surface-muted); font-size: 13px; }
+    .exit strong { color: var(--olive); }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag, .status { display: inline-block; padding: 3px 7px; border-radius: 6px; background: var(--surface-muted); color: var(--muted); }
+    .status.recommended { background: var(--olive-soft); color: var(--olive); }
+    .status.risk { background: var(--amber-soft); color: var(--amber); }
+    .file-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .file-label { color: var(--accent); overflow-wrap: anywhere; }
+    .file-card ul { color: var(--text-secondary); font-size: 14px; }
+    .command { margin: 12px 0 0; border-radius: 8px; overflow: hidden; background: var(--code-bg); color: var(--code-text); }
+    .command-label { display: block; padding: 8px 12px 0; color: #a9a69e; font: 10px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    pre { margin: 0; padding: 10px 12px 13px; overflow-x: auto; font: 12.5px/1.65 var(--mono); }
+    code { font-family: var(--mono); }
+    :not(pre) > code { padding: 2px 5px; border-radius: 5px; background: var(--surface-muted); color: var(--text); font-size: .9em; }
+    .table-scroll { overflow-x: auto; border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; min-width: 690px; }
+    th { color: var(--muted); background: var(--surface-muted); text-align: left; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    td { color: var(--text-secondary); font-size: 13.5px; }
+    td:first-child { color: var(--text); font-weight: 650; }
+    .decision { padding: 18px 20px; border-left: 4px solid var(--accent); }
+    .decision + .decision { margin-top: 12px; }
+    .decision p { margin: 5px 0; color: var(--text-secondary); }
+    .definition { padding: 20px; }
+    .checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 24px; list-style: none; padding: 0; margin: 0; }
+    .checklist li { position: relative; padding-left: 24px; }
+    .checklist li::before { content: "□"; position: absolute; left: 0; color: var(--olive); font-weight: 800; }
+    .sources { font-size: 13px; color: var(--text-secondary); }
+    .sources li + li { margin-top: 8px; }
+    footer { border-top: 1.5px solid var(--border); padding-top: 20px; color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { display: none; }
+      .mobile-nav { display: flex; }
+    }
+    @media (max-width: 760px) {
+      body { padding: 32px 18px 78px; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 42px; }
+      .split, .file-grid { grid-template-columns: 1fr; }
+      .section-intro { margin-left: 0; }
+      .milestone { grid-template-columns: 24px minmax(0, 1fr); }
+      .phase-label { grid-column: 2; text-align: left; padding: 10px 0 4px 10px; }
+      .rail { grid-column: 1; grid-row: 1 / span 2; }
+      .milestone-body { grid-column: 2; margin-left: 10px; }
+      .checklist { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .topbar { align-items: center; }
+      .theme-toggle { width: 44px; overflow: hidden; padding: 9px; }
+      .summary-grid { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      * { transition: none !important; }
+    }
+    @media print {
+      body { padding: 0; background: #fff; color: #111; }
+      .theme-toggle, .toc, .mobile-nav { display: none !important; }
+      .layout { display: block; }
+      section, .card, .milestone-body, .decision { break-inside: avoid; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="topbar">
+        <div>
+          <p class="eyebrow">Implementation plan · AArch64 bare metal</p>
+          <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
+          <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
+          <div class="metadata">
+            <span class="meta">Status: proposed</span>
+            <span class="meta">Updated: 2026-07-17</span>
+            <span class="meta">Zig: pinned 0.17 development snapshot</span>
+          </div>
+        </div>
+        <button class="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false"><span aria-hidden="true">◐</span> <span class="theme-text">Theme</span></button>
+      </div>
+
+      <div class="summary-grid" aria-label="Plan summary">
+        <div class="summary-card primary"><span class="meta">Target</span><strong>Pi 4</strong><span>BCM2711 · Cortex-A72 · AArch64</span></div>
+        <div class="summary-card"><span class="meta">Inner loop</span><strong>QEMU virt</strong><span>Fast, scriptable, GDB-friendly</span></div>
+        <div class="summary-card"><span class="meta">Roadmap</span><strong>11 phases</strong><span>Boot to two isolated Zig processes</span></div>
+        <div class="summary-card"><span class="meta">Strategy</span><strong>3 targets</strong><span>virt · raspi4b · physical Pi</span></div>
+      </div>
+    </header>
+
+    <nav class="mobile-nav" aria-label="Plan sections">
+      <a href="#scope">Scope</a><a href="#strategy">Strategy</a><a href="#architecture">Architecture</a><a href="#milestones">Milestones</a><a href="#structure">Structure</a><a href="#verification">Verification</a><a href="#risks">Risks</a><a href="#decisions">Decisions</a>
+    </nav>
+
+    <div class="layout">
+      <main>
+        <section id="scope">
+          <div class="section-heading"><span class="section-number">01</span><h2>Build a learning OS, not Linux in miniature</h2></div>
+          <p class="section-intro">Learning value wins when it conflicts with convenience in v0. After one complete, understandable vertical slice, the project can evolve toward a usable hobby OS.</p>
+          <div class="split">
+            <article class="card success">
+              <h3>Goals</h3>
+              <ul class="tight">
+                <li>Boot a freestanding AArch64 Zig kernel on QEMU and Raspberry Pi 4.</li>
+                <li>Make serial diagnostics, exceptions, timers, memory, and scheduling understandable.</li>
+                <li>Run preempted, unprivileged Zig programs through a small project-specific syscall ABI.</li>
+                <li>Load programs first from initramfs, then from a read-only FAT filesystem.</li>
+                <li>Keep host-side parsers and algorithms testable with <code>zig build test</code>.</li>
+              </ul>
+            </article>
+            <article class="card boundary">
+              <h3>Non-goals for v0</h3>
+              <ul class="tight">
+                <li>Linux ABI compatibility, networking, USB, graphics, or a desktop.</li>
+                <li>SMP: secondary cores remain parked throughout v0.</li>
+                <li>Floating-point or SIMD in kernel or user programs.</li>
+                <li>Writable filesystems or crash recovery.</li>
+                <li>A general driver framework before two real backends need it.</li>
+                <li>Exact hardware emulation as a substitute for Pi testing.</li>
+              </ul>
+            </article>
+          </div>
+          <p class="note"><strong>Current repository:</strong> it is still the stock hosted Zig executable/library template. Phase 0 deliberately replaces the hosted entry point and native target with a freestanding AArch64 kernel build, while preserving host-native unit tests as a separate build path.</p>
+        </section>
+
+        <section id="strategy">
+          <div class="section-heading"><span class="section-number">02</span><h2>Use three targets with different jobs</h2></div>
+          <p class="section-intro">Most kernel logic should be shared. Only the machine description and drivers vary; no emulator is treated as the hardware specification.</p>
+          <div class="split">
+            <article class="card">
+              <span class="status recommended">Primary loop</span>
+              <h3>QEMU <code>virt</code></h3>
+              <p>Use for daily work and automated smoke tests. It provides a stable PL011, Arm generic timer, GIC, DTB, semihost-independent serial output, and reliable GDB support.</p>
+            </article>
+            <article class="card">
+              <span class="status">Compatibility loop</span>
+              <h3>QEMU <code>raspi4b</code></h3>
+              <p>Use from the board-port phase onward to catch image layout and machine-integration errors. QEMU 9+ supports this model, but incomplete device fidelity remains possible.</p>
+            </article>
+            <article class="card">
+              <span class="status risk">Hardware truth</span>
+              <h3>Physical Raspberry Pi 4</h3>
+              <p>Require a 3.3 V USB-to-TTL serial adapter. Run a small boot, UART, and exception checkpoint in Phase 2; return in Phase 10 for GIC routing, cache behavior, RAM reservations, and SD hardware.</p>
+            </article>
+            <article class="card">
+              <span class="status">Host tests</span>
+              <h3>Native Zig tests</h3>
+              <p>Run pure parsers, allocators, queues, page-table calculations, DTB handling, FAT logic, and ELF loading as normal tests before booting a kernel.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="architecture">
+          <div class="section-heading"><span class="section-number">03</span><h2>Keep the kernel portable and the BSP thin</h2></div>
+          <p class="section-intro">The architecture boundary is intentionally small: generic kernel code consumes explicit platform capabilities instead of importing board register addresses.</p>
+          <div class="diagram-panel">
+            <div class="legend"><span><i class="portable"></i>portable kernel</span><span><i class="platform"></i>target-specific platform</span></div>
+            <svg viewBox="0 0 760 430" role="img" aria-labelledby="diagram-title diagram-desc">
+              <title id="diagram-title">Kernel and platform architecture</title>
+              <desc id="diagram-desc">Host-tested kernel subsystems call narrow platform interfaces implemented by QEMU virt or Raspberry Pi 4 drivers.</desc>
+              <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker></defs>
+              <rect class="node-accent" x="40" y="35" width="200" height="72" rx="10"/><text x="140" y="65" text-anchor="middle">Zig userspace</text><text class="small" x="140" y="87" text-anchor="middle">EL0 · tiny runtime · no libc</text>
+              <rect class="node-accent" x="280" y="35" width="200" height="72" rx="10"/><text x="380" y="65" text-anchor="middle">Kernel core</text><text class="small" x="380" y="87" text-anchor="middle">EL1 · preemptive · single-core</text>
+              <rect class="node-accent" x="520" y="35" width="200" height="72" rx="10"/><text x="620" y="65" text-anchor="middle">Memory + files</text><text class="small" x="620" y="87" text-anchor="middle">VM · allocator · ELF · FAT</text>
+              <path class="line" d="M240 71 H280" marker-end="url(#arrow)"/><path class="line" d="M480 71 H520" marker-end="url(#arrow)"/>
+              <rect class="node" x="160" y="155" width="440" height="72" rx="10"/><text x="380" y="184" text-anchor="middle">Platform contract</text><text class="small" x="380" y="206" text-anchor="middle">console · irq controller · timer · memory map · block device</text>
+              <path class="line" d="M380 107 V155" marker-end="url(#arrow)"/><path class="line" d="M620 107 C620 135 560 135 560 155" marker-end="url(#arrow)"/>
+              <rect class="node-hardware" x="40" y="280" width="210" height="100" rx="10"/><text x="145" y="312" text-anchor="middle">QEMU virt</text><text class="small" x="145" y="335" text-anchor="middle">PL011 · GICv2 · virtio</text><text class="small" x="145" y="354" text-anchor="middle">generated DTB</text>
+              <rect class="node-hardware" x="275" y="280" width="210" height="100" rx="10"/><text x="380" y="312" text-anchor="middle">QEMU raspi4b</text><text class="small" x="380" y="335" text-anchor="middle">board-shape check</text><text class="small" x="380" y="354" text-anchor="middle">not hardware truth</text>
+              <rect class="node-hardware" x="510" y="280" width="210" height="100" rx="10"/><text x="615" y="312" text-anchor="middle">Raspberry Pi 4</text><text class="small" x="615" y="335" text-anchor="middle">BCM2711 · GIC-400</text><text class="small" x="615" y="354" text-anchor="middle">PL011 · SD/eMMC</text>
+              <path class="line" d="M270 227 C270 250 145 250 145 280" marker-end="url(#arrow)"/><path class="line" d="M380 227 V280" marker-end="url(#arrow)"/><path class="line" d="M490 227 C490 250 615 250 615 280" marker-end="url(#arrow)"/>
+              <text class="small" x="380" y="417" text-anchor="middle">same kernel contract · distinct addresses and device implementations</text>
+            </svg>
+            <p class="caption">Start with compile-time platform selection. Preserve the firmware DTB pointer from entry, but defer parsing until RAM and reserved-region discovery are needed. Use freestanding-compatible <code>std</code> selectively; console, allocation, panic, time, and synchronization remain kernel-owned.</p>
+          </div>
+        </section>
+
+        <section id="milestones">
+          <div class="section-heading"><span class="section-number">04</span><h2>Advance only through observable gates</h2></div>
+          <p class="section-intro">Each phase leaves the kernel easier to diagnose than before. Avoid combining a new CPU mechanism with a new device driver in one debugging step.</p>
+          <div class="timeline">
+            <article class="milestone foundation">
+              <div class="phase-label">Phase 0</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Freestanding build and reproducible toolchain</h3><p>Pin the Zig development snapshot in Nix, resolve an <code>aarch64-freestanding-none</code> target, add a linker script at <code>0x80000</code>, put <code>_start</code> first, create a 16-byte-aligned stack, clear BSS, preserve the DTB pointer from <code>x0</code>, and emit both symbol-rich ELF and <code>kernel8.img</code>. Use small external assembly files only where exact instruction layout matters.</p><div class="tags"><span class="tag">build.zig</span><span class="tag">linker.ld</span><span class="tag">boot.S</span><span class="tag">flake.nix</span></div><div class="exit"><strong>Exit:</strong> QEMU reaches Zig <code>kernelMain</code>; GDB resolves symbols and can break at <code>_start</code>.</div></div>
+            </article>
+            <article class="milestone foundation">
+              <div class="phase-label">Phase 1</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Polled console, panic, and boot facts</h3><p>Implement QEMU PL011 using volatile 32-bit MMIO. Add tiny formatting and panic paths that do not allocate. Print <code>CurrentEL</code>, <code>MPIDR_EL1</code>, DTB pointer, and linker boundaries.</p><div class="tags"><span class="tag">uart</span><span class="tag">mmio</span><span class="tag">panic</span></div><div class="exit"><strong>Exit:</strong> every boot and deliberate panic produces a deterministic serial marker before halting.</div></div>
+            </article>
+            <article class="milestone foundation">
+              <div class="phase-label">Phase 2</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>EL1 exceptions and the first Pi 4 checkpoint</h3><p>Detect the actual entry level, configure named EL2/EL3 control bits when needed, and enter EL1h. Install a 2 KiB-aligned, complete 16-slot vector table; save a full integer frame and decode ESR, ELR, SPSR, and FAR. Then add only enough BCM2711 GPIO/PL011 support and boot packaging to exercise the same path on a physical Pi.</p><div class="tags"><span class="tag">aarch64</span><span class="tag">vectors</span><span class="tag">Pi PL011</span><span class="tag">3.3 V serial</span></div><div class="exit"><strong>Exit:</strong> a deliberate <code>brk</code> reports the expected exception class and return address in QEMU and over a 3.3 V USB-to-TTL serial connection on Pi 4. Stop hardware work here until Phase 10.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 3</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Generic timer and GIC interrupts</h3><p>Build a GICv2 implementation for QEMU <code>virt</code>, route the Arm generic physical timer, acknowledge/end interrupts correctly, and keep timer handlers allocation- and logging-free.</p><div class="tags"><span class="tag">GICv2</span><span class="tag">CNTP</span><span class="tag">IRQ</span></div><div class="exit"><strong>Exit:</strong> 1,000 ticks arrive with preserved registers, monotonic time, and no unhandled interrupt.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 4</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>DTB and physical frame allocation</h3><p>Until this phase, use minimal compile-time platform constants and only preserve the DTB. Now parse enough flattened device tree data to discover RAM and reservations. Reserve kernel, stacks, DTB, and bootstrap tables. Add a bitmap allocator for 4 KiB frames with range and double-free assertions.</p><div class="tags"><span class="tag">FDT</span><span class="tag">page bitmap</span><span class="tag">host tests</span></div><div class="exit"><strong>Exit:</strong> native stress tests pass, and a boot-time allocation sweep never returns a reserved frame.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 5</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Identity map, then a protected high-half kernel</h3><p>Build 4 KiB translation tables with normal-memory and device attributes. First enable a minimal identity map and verify text RX, rodata R/NX, data/stacks/heap RW/NX, and MMIO device RW/NX. In a separate step, map the kernel through <code>TTBR1_EL1</code> and branch high. Use barriers around MAIR, TCR, TTBR, TLB, and SCTLR changes.</p><div class="tags"><span class="tag">identity map</span><span class="tag">TTBR1</span><span class="tag">high half</span><span class="tag">W^X</span></div><div class="exit"><strong>Exit:</strong> console and timer survive both transitions; writes to text and unmapped addresses fault predictably. The high-half transition is complete before EL0 work starts.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 6</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Kernel threads and preemptive round-robin scheduling</h3><p>Give each task a separate kernel stack and callee-saved AArch64 context. Prove cooperative <code>yield</code> first, then let the timer request rescheduling at a safe exception-return boundary. Compile without FP/SIMD and make accidental use trap visibly so integer-only task state is sufficient.</p><div class="tags"><span class="tag">context switch</span><span class="tag">run queue</span><span class="tag">preemption</span><span class="tag">integer state</span></div><div class="exit"><strong>Exit:</strong> three threads make bounded progress under voluntary and timer-driven switching; preemption is mandatory before EL0.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 7</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>EL0 and a project-specific syscall ABI</h3><p>Create separate user/kernel stacks, enter EL0 with <code>eret</code>, and decode <code>svc</code>. Define an explicitly unstable, versioned ABI using the conventional AArch64 shape: syscall number in <code>x8</code>, arguments in <code>x0</code>–<code>x5</code>, and result/error in <code>x0</code>. Expose only <code>write</code>, <code>yield</code>, <code>exit</code>, and bounded memory growth initially; do not claim Linux compatibility.</p><div class="tags"><span class="tag">EL0</span><span class="tag">SVC</span><span class="tag">custom ABI</span><span class="tag">versioned</span></div><div class="exit"><strong>Exit:</strong> preempted user code prints through a syscall but faults when touching UART or kernel memory directly.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 8</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Zig userspace, per-process address spaces, and ELF loading</h3><p>Add a tiny project-owned freestanding Zig runtime with <code>_start</code>, panic behavior, linker script, and syscall wrappers; use one assembly fixture only to validate the initial EL0 transition. Keep the kernel in <code>TTBR1_EL1</code>, switch process mappings through <code>TTBR0_EL1</code> with correct ASID/TLB handling, and load static AArch64 ELF binaries.</p><div class="tags"><span class="tag">Zig runtime</span><span class="tag">TTBR0</span><span class="tag">ASID</span><span class="tag">ELF64</span></div><div class="exit"><strong>Exit:</strong> two preempted Zig processes use identical virtual addresses backed by distinct physical frames.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 9</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Initramfs, then read-only FAT in QEMU</h3><p>First load a Zig process from a tiny deterministic initramfs so process loading is independent of block-driver work. Then define a narrow block-device contract, add QEMU virtio-blk, and implement a host-tested, read-only FAT16/32 parser before any write path.</p><div class="tags"><span class="tag">initramfs</span><span class="tag">BlockDevice</span><span class="tag">virtio-blk</span><span class="tag">FAT</span></div><div class="exit"><strong>Exit:</strong> an automated, timeout-bounded demo runs self-checks, loads two isolated Zig programs from a reproducible FAT image, proves timer preemption, and prints a final pass marker.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase-label">Phase 10</div><div class="rail"><span class="dot"></span></div>
+              <div class="milestone-body"><h3>Complete the Raspberry Pi 4 board support package</h3><p>Build on the Phase 2 serial checkpoint: consume the preserved firmware DTB, use the BCM2711 <code>0xFE000000</code> peripheral map, initialize GIC-400 and the generic timer, and validate RAM reservations and MMU/cache attributes. Add SD/eMMC only after all other kernel tests are stable over serial. Keep all secondary cores parked.</p><div class="tags"><span class="tag">BCM2711</span><span class="tag">GIC-400</span><span class="tag">single-core</span><span class="tag">SD/eMMC</span></div><div class="exit"><strong>Exit:</strong> the same automated two-process demo passes on QEMU and a physical Pi 4; only BSP modules differ. A serial shell is the first post-v0 feature.</div></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="structure">
+          <div class="section-heading"><span class="section-number">05</span><h2>Let the repository grow along ownership lines</h2></div>
+          <p class="section-intro">This is a target shape, not a request to create empty scaffolding. Add a path only in the phase that first needs it.</p>
+          <div class="file-grid">
+            <article class="card file-card"><span class="file-label">build.zig · build.zig.zon · flake.nix</span><h3>Build graph and tools</h3><ul><li>Freestanding kernel and native-test modules.</li><li>ELF, raw image, run, debug, and smoke steps.</li><li>Pinned Zig and QEMU through Nix.</li></ul></article>
+            <article class="card file-card"><span class="file-label">src/arch/aarch64/</span><h3>CPU mechanisms</h3><ul><li>Boot/EL transition and vector assembly.</li><li>System registers, barriers, context frames.</li><li>Translation-table primitives.</li></ul></article>
+            <article class="card file-card"><span class="file-label">src/kernel/</span><h3>Portable policy</h3><ul><li>Panic, scheduler, process, syscall.</li><li>Physical/virtual memory ownership.</li><li>No board register constants.</li></ul></article>
+            <article class="card file-card"><span class="file-label">src/platform/qemu_virt/ · src/platform/rpi4/</span><h3>Board support</h3><ul><li>Platform composition and address maps.</li><li>Console, GIC configuration, block devices.</li><li>Firmware/DTB hand-off details.</li></ul></article>
+            <article class="card file-card"><span class="file-label">src/formats/</span><h3>Host-testable formats</h3><ul><li>Flattened device tree, ELF64, FAT.</li><li>Slice-based parsing without MMIO.</li><li>Malformed-input and fixture tests.</li></ul></article>
+            <article class="card file-card"><span class="file-label">userspace/ · src/user_runtime/</span><h3>Freestanding Zig programs</h3><ul><li>Tiny <code>_start</code>, panic, and syscall wrappers.</li><li>Static ELF programs without libc or FP/SIMD.</li><li>ABI version documented beside both sides.</li></ul></article>
+            <article class="card file-card"><span class="file-label">tools/ · scripts/</span><h3>Repeatable operations</h3><ul><li>Disk-image creation and serial smoke tests.</li><li>Generate <code>zig-out/rpi4-boot/</code> with firmware, DTB/config, kernel, and manifest.</li><li>No automated SD-device flashing in v0.</li></ul></article>
+          </div>
+          <div class="command">
+            <span class="command-label">Planned development commands — all through the Nix shell</span>
+            <pre><code>nix develop --command zig build test
+nix develop --command zig build run-virt
+nix develop --command zig build smoke-virt
+nix develop --command zig build debug-virt
+nix develop --command zig build bundle-rpi4</code></pre>
+          </div>
+          <p class="caption">Verify exact Zig 0.17 development APIs against the pinned compiler before implementing each build step; online Zig bare-bones examples age quickly.</p>
+        </section>
+
+        <section id="verification">
+          <div class="section-heading"><span class="section-number">06</span><h2>Automate the serial contract first</h2></div>
+          <p class="section-intro">Kernel tests need layers. Native tests provide speed; QEMU smoke tests prove machine integration; hardware tests catch assumptions no emulator can.</p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Layer</th><th>What it proves</th><th>Gate</th></tr></thead>
+              <tbody>
+                <tr><td>Compile-time checks</td><td>Context-frame offsets, descriptor masks, alignment, and platform contracts agree.</td><td>Every build</td></tr>
+                <tr><td>Native Zig tests</td><td>FDT/FAT/ELF parsers, frame allocator, run queue, and page-table calculations work on malformed and normal input.</td><td>Every change</td></tr>
+                <tr><td>QEMU virt smoke</td><td>Boot, serial, exceptions, IRQs, allocation, process isolation, and filesystem path work end to end.</td><td>Every milestone</td></tr>
+                <tr><td>QEMU raspi4b smoke</td><td>Pi image format and board-facing setup remain compatible with the emulated Pi 4 machine.</td><td>Phase 10 onward</td></tr>
+                <tr><td>Physical Pi 4</td><td>Phase 2 proves firmware entry, PL011, and exceptions; Phase 10 proves GIC, caches, memory map, preemption, isolation, and SD storage.</td><td>Phase 2 and every later BSP feature</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="split" style="margin-top:16px">
+            <article class="card"><h3>Serial protocol</h3><p>Emit concise machine-readable markers such as <code>BOOT:OK</code>, <code>IRQ:1000</code>, and <code>TEST:PASS</code>. The smoke runner enforces a timeout and dumps the final serial transcript on failure.</p></article>
+            <article class="card"><h3>Debug contract</h3><p>Keep the ELF and map file, support QEMU <code>-S -s</code>, document the GDB attach command, and ensure every unexpected exception prints enough state to reproduce it.</p></article>
+          </div>
+        </section>
+
+        <section id="risks">
+          <div class="section-heading"><span class="section-number">07</span><h2>Do not copy Pi 3 constants into a Pi 4 kernel</h2></div>
+          <p class="section-intro">The linked tutorials teach the right concepts, but several concrete addresses and controllers belong to BCM2837-era boards.</p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+              <tbody>
+                <tr><td>Wrong peripheral map</td><td><span class="status risk">High</span></td><td>Pi 4 uses a peripheral base around <code>0xFE000000</code>, not Pi 3's <code>0x3F000000</code>. Keep addresses in the BSP and confirm against DTB/docs.</td></tr>
+                <tr><td>Wrong interrupt controller</td><td><span class="status risk">High</span></td><td>Use GIC-400/GICv2 paths for BCM2711 and QEMU virt; do not adopt the old BCM legacy pending registers as the design.</td></tr>
+                <tr><td>UART works only by accident</td><td><span class="status risk">High</span></td><td>Prefer PL011 first. Mini UART baud depends on core clock; BCM2711 GPIO pulls differ from older boards.</td></tr>
+                <tr><td>Hard-coded RAM size</td><td><span class="status risk">High</span></td><td>Discover memory and reserved regions from DTB. Pi 4 RAM sizes vary; never assume a fixed 1 GiB map.</td></tr>
+                <tr><td>Bad MMU attributes</td><td><span class="status risk">High</span></td><td>Separate normal and device memory, enforce W^X, use required barriers, and enable caches only after attribute tests pass.</td></tr>
+                <tr><td>QEMU-only success</td><td><span class="status">Medium</span></td><td>Run the narrow serial/exception checkpoint in Phase 2, then complete hardware gates in Phase 10; keep SD last.</td></tr>
+                <tr><td>Hidden FP/SIMD state</td><td><span class="status">Medium</span></td><td>Disable FP/SIMD code generation for v0 kernel and userspace, trap accidental use, and keep context switching integer-only.</td></tr>
+                <tr><td>Zig snapshot drift</td><td><span class="status">Medium</span></td><td>Pin the snapshot, inspect local standard-library/build APIs, and upgrade separately from kernel feature work.</td></tr>
+                <tr><td>Scope explosion</td><td><span class="status">Medium</span></td><td>Single core, polled console, read-only files, static userspace, and no networking for the first complete vertical slice.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="decisions">
+          <div class="section-heading"><span class="section-number">08</span><h2>These implementation choices are settled for v0</h2></div>
+          <p class="section-intro">Change these only when implementation evidence invalidates an assumption; they are constraints, not unresolved options.</p>
+          <article class="decision"><h3>Small, auditable assembly boundary</h3><p>Use external assembly for reset entry, vector slots, register save/restore, context switching, and <code>eret</code> paths. Keep policy, drivers, and inspectable system-register helpers in Zig.</p><p class="meta">Committed · Phase 0</p></article>
+          <article class="decision"><h3>Identity map first, high half before EL0</h3><p>Do not combine first MMU enable with relocation. Prove protected identity mappings, then move the kernel through <code>TTBR1_EL1</code> before userspace begins.</p><p class="meta">Committed · Phase 5</p></article>
+          <article class="decision"><h3>Selective standard library use</h3><p>Use pure, freestanding-compatible <code>std</code> utilities where they help, but keep allocation, console I/O, panic, time, and synchronization kernel-owned. Do not fork <code>std</code> or couple kernel APIs to unstable hosted I/O.</p><p class="meta">Committed · All phases</p></article>
+          <article class="decision"><h3>Custom Zig userspace ABI</h3><p>Use a conventional AArch64 register shape without promising Linux compatibility. User programs are freestanding Zig with a tiny project runtime; FP/SIMD remains disabled in v0.</p><p class="meta">Committed · Phases 7–8</p></article>
+          <article class="decision"><h3>Initramfs before block storage</h3><p>Prove process loading from initramfs, then add virtio-blk and read-only FAT. Implement Pi SD/eMMC only after every other board feature is stable over serial.</p><p class="meta">Committed · Phases 9–10</p></article>
+          <article class="decision"><h3>Single-core v0 with a safe deployment bundle</h3><p>Keep secondary cores parked. Generate <code>zig-out/rpi4-boot/</code> for manual copying to a FAT partition; do not include an automated flashing command. SMP and a serial shell begin the post-v0 roadmap.</p><p class="meta">Committed · Through Phase 10</p></article>
+        </section>
+
+        <section id="done">
+          <div class="section-heading"><span class="section-number">09</span><h2>The first release is done when the vertical slice holds</h2></div>
+          <p class="section-intro">This checklist defines a coherent v0 rather than a collection of disconnected demos.</p>
+          <div class="definition">
+            <ul class="checklist">
+              <li>Nix shell reproduces the pinned Zig/QEMU build.</li>
+              <li>ELF, <code>kernel8.img</code>, and a safe Pi boot bundle are generated.</li>
+              <li>QEMU smoke test is deterministic and timeout-bounded.</li>
+              <li>Phase 2 serial/exception gate passes on a physical Pi 4.</li>
+              <li>Timer preemption preserves task state.</li>
+              <li>High-half kernel mappings enforce W^X permissions.</li>
+              <li>FP/SIMD is disabled and accidental use traps.</li>
+              <li>Two isolated, preempted Zig EL0 processes run.</li>
+              <li>Programs load from initramfs and read-only FAT.</li>
+              <li>Pi 4 boots from a documented firmware/SD layout.</li>
+              <li>The automated two-process demo passes on QEMU and Pi.</li>
+              <li>Only one core is active throughout v0.</li>
+              <li>Hardware assumptions are documented beside the BSP.</li>
+              <li>Debug and recovery steps are documented.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="references">
+          <div class="section-heading"><span class="section-number">10</span><h2>Use the references for concepts, then verify Pi 4 specifics</h2></div>
+          <p class="section-intro">The two tutorial repositories primarily teach Raspberry Pi 3-era hardware. Their progression remains valuable; their constants are not authoritative for BCM2711.</p>
+          <ul class="sources">
+            <li><a href="https://github.com/bztsrc/raspi3-tutorial">bztsrc/raspi3-tutorial</a> — compact examples for boot, UART, exception levels, MMU, SD, and FAT.</li>
+            <li><a href="https://github.com/s-matyukevich/raspberry-pi-os/tree/master">s-matyukevich/raspberry-pi-os</a> — staged lessons for exceptions, interrupts, scheduling, EL0, syscalls, and virtual memory.</li>
+            <li><a href="https://wiki.osdev.org/Raspberry_Pi_Bare_Bones#Updated_Support_for_AArch64_(raspi2,_raspi3,_raspi4)">OSDev: Raspberry Pi Bare Bones</a> — AArch64 image layout, <code>0x80000</code> load address, DTB handoff, Pi 4 peripheral base, and QEMU <code>raspi4b</code> support.</li>
+            <li><a href="https://wiki.osdev.org/Zig_Bare_Bones">OSDev: Zig Bare Bones</a> — freestanding Zig build and linker structure; adapt examples to the repository's pinned Zig 0.17 snapshot.</li>
+            <li>Before the Phase 2 hardware checkpoint, add the Raspberry Pi 4 Model B schematic, BCM2711 peripherals documentation, Armv8-A architecture reference, PL011 manual, and firmware boot documentation as primary sources; add the GIC-400 manual before Phase 10.</li>
+          </ul>
+        </section>
+      </main>
+
+      <aside class="toc" aria-label="Table of contents">
+        <strong class="meta">On this page</strong>
+        <a href="#scope">01 · Scope</a>
+        <a href="#strategy">02 · Target strategy</a>
+        <a href="#architecture">03 · Architecture</a>
+        <a href="#milestones">04 · Milestones</a>
+        <a href="#structure">05 · Repository shape</a>
+        <a href="#verification">06 · Verification</a>
+        <a href="#risks">07 · Risks</a>
+        <a href="#decisions">08 · Decisions</a>
+        <a href="#done">09 · Definition of done</a>
+        <a href="#references">10 · References</a>
+      </aside>
+    </div>
+
+    <footer>thekorn-os implementation plan · self-contained HTML · no external assets</footer>
+  </div>
+
+  <script>
+    (() => {
+      const button = document.querySelector(".theme-toggle");
+      const label = button.querySelector(".theme-text");
+
+      function updateButton() {
+        const dark = document.documentElement.classList.contains("dark");
+        button.setAttribute("aria-pressed", String(dark));
+        button.setAttribute("aria-label", `Switch to ${dark ? "light" : "dark"} theme`);
+        label.textContent = dark ? "Light" : "Dark";
+      }
+
+      button.addEventListener("click", () => {
+        const dark = document.documentElement.classList.toggle("dark");
+        localStorage.setItem("plan-theme", dark ? "dark" : "light");
+        updateButton();
+      });
+
+      updateButton();
+    })();
+  </script>
+</body>
+</html>
