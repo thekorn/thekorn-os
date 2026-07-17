@@ -3,7 +3,8 @@ set -uo pipefail
 
 kernel=${1:?usage: smoke-virt.sh KERNEL_ELF}
 transcript=$(mktemp)
-trap 'rm -f "$transcript"' EXIT
+qemu_log=$(mktemp)
+trap 'rm -f "$transcript" "$qemu_log"' EXIT
 
 set +e
 timeout 5s qemu-system-aarch64 \
@@ -11,18 +12,22 @@ timeout 5s qemu-system-aarch64 \
   -cpu cortex-a72 \
   -smp 2 \
   -m 128M \
-  -nographic \
-  -kernel "$kernel" >"$transcript" 2>&1
+  -display none \
+  -monitor none \
+  -serial "file:$transcript" \
+  -kernel "$kernel" >"$qemu_log" 2>&1
 status=$?
 set -e
 
 cat "$transcript"
+cat "$qemu_log" >&2
 if [[ $status -ne 124 ]]; then
   echo "smoke-virt: expected QEMU to be stopped by the timeout, got status $status" >&2
   exit 1
 fi
-if [[ $(grep -c '^BOOT:START' "$transcript") -ne 1 ]]; then
-  echo "smoke-virt: expected exactly one boot core" >&2
+boot_count=$(awk '{ count += gsub(/BOOT:START/, "") } END { print count + 0 }' "$transcript")
+if [[ $boot_count -ne 1 ]]; then
+  echo "smoke-virt: expected exactly one boot core, observed $boot_count" >&2
   exit 1
 fi
 
