@@ -3,6 +3,6 @@ arm_64bit=1
 kernel=kernel8.img
 enable_uart=1
 init_uart_clock=48000000
-dtoverlay=disable-bt
+device_tree=
 
 [all]

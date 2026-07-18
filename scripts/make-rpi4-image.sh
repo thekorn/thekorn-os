@@ -5,11 +5,9 @@ kernel=$1
 config=$2
 start4=$3
 fixup4=$4
-dtb=$5
-disable_bt=$6
-firmware_license=$7
-firmware_revision=$8
-image=$9
+firmware_license=$5
+firmware_revision=$6
+image=$7
 readonly image_size=$((64 * 1024 * 1024))
 readonly partition_offset=$((1024 * 1024))
 
@@ -37,19 +35,16 @@ PY
 
 drive="$image@@$partition_offset"
 mformat -i "$drive" -F -H 2048 -N 54484b4f -v THEKORN ::
-mmd -i "$drive" ::overlays
 mcopy -i "$drive" "$kernel" ::kernel8.img
 mcopy -i "$drive" "$config" ::config.txt
 mcopy -i "$drive" "$start4" ::start4.elf
 mcopy -i "$drive" "$fixup4" ::fixup4.dat
-mcopy -i "$drive" "$dtb" ::bcm2711-rpi-4-b.dtb
-mcopy -i "$drive" "$disable_bt" ::overlays/disable-bt.dtbo
 mcopy -i "$drive" "$firmware_license" ::LICENCE.broadcom
 
 manifest=$(mktemp)
 trap 'rm -f "$manifest"' EXIT
 {
-  echo "Raspberry Pi firmware revision: $firmware_revision"
+  echo "Raspberry Pi firmware release: $firmware_revision"
   echo "Kernel: kernel8.img"
   echo "Target: Raspberry Pi 4 Model B (BCM2711)"
 } >"$manifest"

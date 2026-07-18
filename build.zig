@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
         "Prioritize performance, safety, or binary size",
     ) orelse .ReleaseSmall;
     const coverage = b.option(bool, "coverage", "Collect test coverage with kcov") orelse false;
+    const rpi_firmware = b.dependency("raspberrypi_firmware", .{});
     const kernel_target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
         .os_tag = .freestanding,
@@ -42,12 +43,10 @@ pub fn build(b: *std.Build) void {
     rpi_disk.addFileArg(b.path("scripts/make-rpi4-image.sh"));
     rpi_disk.addFileArg(image.getOutput());
     rpi_disk.addFileArg(b.path("scripts/rpi4-config.txt"));
-    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_START4"));
-    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_FIXUP4"));
-    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_DTB"));
-    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_DISABLE_BT"));
-    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_FIRMWARE_LICENSE"));
-    rpi_disk.addArg(requiredEnv(b, "RPI_FIRMWARE_REVISION"));
+    rpi_disk.addFileArg(rpi_firmware.path("boot/start4.elf"));
+    rpi_disk.addFileArg(rpi_firmware.path("boot/fixup4.dat"));
+    rpi_disk.addFileArg(rpi_firmware.path("boot/LICENCE.broadcom"));
+    rpi_disk.addArg("1.20260521");
     const rpi_disk_output = rpi_disk.addOutputFileArg("thekorn-os-rpi4.img");
     const install_rpi_disk = b.addInstallFile(rpi_disk_output, "thekorn-os-rpi4.img");
     b.getInstallStep().dependOn(&install_elf.step);
@@ -142,16 +141,6 @@ pub fn build(b: *std.Build) void {
         builder.addRule(.{ .builtin = .no_orelse_unreachable }, .{});
         break :step builder.build();
     });
-}
-
-fn requiredEnvPath(b: *std.Build, name: []const u8) std.Build.LazyPath {
-    return b.graph.cwdRelativePath(requiredEnv(b, name));
-}
-
-fn requiredEnv(b: *std.Build, name: []const u8) []const u8 {
-    return b.graph.environ_map.get(name) orelse {
-        std.debug.panic("{s} is unset; run Zig through nix develop", .{name});
-    };
 }
 
 fn addKernel(

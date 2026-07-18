@@ -18,8 +18,9 @@ status.
 - A platform supported by `flake.nix` (`aarch64-darwin`, `aarch64-linux`, or
   `x86_64-linux`)
 
-Zig, QEMU, and the other development tools are pinned by the Nix flake. Run Zig
-commands through `nix develop`; do not rely on a host Zig installation.
+The Nix flake supplies the pinned compiler and host tools on
+`aarch64-darwin`, `aarch64-linux`, and `x86_64-linux`. It does not supply
+project inputs: Zig fetches those from `build.zig.zon` into `zig-pkg/`.
 
 ## Build
 
@@ -33,8 +34,8 @@ and debug information in the ELF. It creates:
 - `zig-out/bin/thekorn_os` — symbol-rich QEMU `virt` ELF linked at `0x40080000`
 - `zig-out/kernel8.img` — raw Raspberry Pi 4 kernel linked at `0x80000`
 - `zig-out/thekorn-os-rpi4.img` — 64 MiB Pi-ready SD-card image with an MBR,
-  FAT32 boot partition, pinned Raspberry Pi firmware, DTB, UART overlay, and
-  the Pi kernel
+  FAT32 boot partition, the pinned Raspberry Pi firmware release, and the Pi
+  kernel
 
 Write `zig-out/thekorn-os-rpi4.img` to a spare microSD card with the **Use
 custom** action in Raspberry Pi Imager or an equivalent image writer. This

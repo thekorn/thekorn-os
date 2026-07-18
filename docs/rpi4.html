@@ -414,7 +414,7 @@
 
         <section id="tools">
           <div class="section-heading"><span class="section-number">02</span><h2>Know what is automated—and what is not</h2></div>
-          <p class="section-intro">The repository pins the compiler, QEMU, and Raspberry Pi firmware and creates the complete card image. It deliberately never selects or writes an arbitrary disk.</p>
+          <p class="section-intro">The Zig package manifest pins Raspberry Pi firmware and the build creates the complete card image. Nix supplies the host tools but does not fetch project artifacts. The build deliberately never selects or writes an arbitrary disk.</p>
 
           <div class="table-wrap">
             <table>
@@ -455,11 +455,11 @@ ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
             </article>
             <article class="step">
               <span class="step-number">3</span>
-              <div><h3>Preserve the firmware hand-off</h3><p>The firmware passes the merged Device Tree Blob pointer in <code>x0</code>. Keep preserving it at entry and report it over serial; later phases will parse it for RAM and reserved regions.</p></div>
+              <div><h3>Defer the device tree explicitly</h3><p>This checkpoint does not parse a Device Tree Blob, so its minimal configuration disables DTB loading and the reported pointer is zero. The entry path still preserves <code>x0</code> so a later phase can restore DTB loading and discover RAM and reserved regions.</p></div>
             </article>
             <article class="step">
               <span class="step-number">4</span>
-              <div><h3>Build a reproducible card image</h3><p>The image includes a pinned, mutually compatible firmware/DTB set, <code>config.txt</code>, <code>kernel8.img</code>, the Broadcom license, and a firmware revision manifest.</p></div>
+              <div><h3>Build a reproducible card image</h3><p>The image includes a pinned Raspberry Pi firmware release, <code>config.txt</code>, <code>kernel8.img</code>, the Broadcom license, and a firmware release manifest.</p></div>
             </article>
             <article class="step">
               <span class="step-number">5</span>
@@ -496,7 +496,7 @@ ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
               <span class="step-number">3</span>
               <div>
                 <h3>Optionally inspect the generated configuration</h3>
-                <p>The image already contains the kernel, matching pinned firmware, Pi 4 DTB, UART overlay, and this configuration:</p>
+                <p>The image already contains the kernel, matching pinned firmware, and this configuration:</p>
                 <div class="command">
                   <span class="command-label">config.txt — explicit Pi 4 bare-metal boot</span>
                   <pre><code>[pi4]
@@ -504,12 +504,12 @@ arm_64bit=1
 kernel=kernel8.img
 enable_uart=1
 init_uart_clock=48000000
-dtoverlay=disable-bt
+device_tree=
 
 [all]</code></pre>
                   <button class="copy-button" type="button" aria-label="Copy config.txt">Copy</button>
                 </div>
-                <p><code>dtoverlay=disable-bt</code> makes UART0/PL011 primary on the header. <code>init_uart_clock</code> fixes the clock used by the kernel's baud divisors. <code>cmdline.txt</code> is not needed.</p>
+                <p><code>device_tree=</code> disables a hand-off the kernel does not parse yet. The Pi backend routes PL011 directly to GPIO 14/15, and <code>init_uart_clock</code> fixes the clock used by its baud divisors. <code>cmdline.txt</code> is not needed.</p>
               </div>
             </article>
             <article class="step">
@@ -524,8 +524,6 @@ dtoverlay=disable-bt
               <p>The generated FAT32 boot partition contains:</p>
               <ul>
                 <li><code>start4.elf</code> and matching <code>fixup4.dat</code> — VideoCore firmware pair.</li>
-                <li><code>bcm2711-rpi-4-b.dtb</code> — base device tree passed to the kernel after overlays.</li>
-                <li><code>overlays/disable-bt.dtbo</code> — required by the configuration shown here.</li>
                 <li><code>config.txt</code> — firmware configuration.</li>
                 <li><code>kernel8.img</code> — thekorn-os raw AArch64 kernel image.</li>
               </ul>
@@ -534,7 +532,7 @@ dtoverlay=disable-bt
           </details>
           <details>
             <summary>Can I download firmware directly instead?</summary>
-            <div><p>The Nix environment already downloads each required file from a pinned <a href="https://github.com/raspberrypi/firmware/tree/master/boot">raspberrypi/firmware</a> revision, verifies its hash, and includes the Broadcom license. No mutable branch is read during the build.</p></div>
+            <div><p><code>build.zig.zon</code> pins the official <a href="https://github.com/raspberrypi/firmware/releases/tag/1.20260521">raspberrypi/firmware 1.20260521 release archive</a> and its Zig package hash. Zig places the package in <code>zig-pkg/</code>; <code>build.zig</code> reads <code>start4.elf</code>, <code>fixup4.dat</code>, and the Broadcom license from that dependency. Nix is not involved.</p></div>
           </details>
         </section>
 
@@ -658,7 +656,7 @@ picocom --baud 115200 /dev/ttyUSB0
             <pre><code>BOOT:START
 BOOT:CURRENT_EL=1
 BOOT:MPIDR=0x...
-BOOT:DTB=0x...
+BOOT:DTB=0x0000000000000000
 BOOT:KERNEL_START=0x0000000000080000
 EXCEPTION:VECTOR=0x...
 EXCEPTION:EC=0x000000000000003c

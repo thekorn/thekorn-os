@@ -8,6 +8,10 @@
             .url = "git+https://github.com/thekorn/zlinter#fix-build_lint_builtin-build.zig.zon",
             .hash = "zlinter-0.0.1-OjQ08YUfFQDT9Xr6G-G1C0CASyYSAsTj3E4eeRs7LPAf",
         },
+        .raspberrypi_firmware = .{
+            .url = "https://github.com/raspberrypi/firmware/releases/download/1.20260521/raspi-firmware_1.20260521.orig.tar.xz",
+            .hash = "N-V-__8AAJXIWQHi4ryX7nYGW4qHPP3UJ57d9-kxaZOlXF1N",
+        },
     },
     .paths = .{
         "build.zig",
