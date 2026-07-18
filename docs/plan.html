@@ -260,7 +260,7 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: implementation in progress · phases 0–1 complete</span>
+            <span class="meta">Status: implementation in progress · Phase 2 awaits hardware verification</span>
             <span class="meta">Updated: 2026-07-18</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0 and 1 are complete. The project now builds a symbol-rich freestanding AArch64 ELF and <code>kernel8.img</code>, boots through <code>_start</code> into Zig on QEMU <code>virt</code>, reports boot facts over PL011, and verifies deterministic boot and panic markers with a timeout-bounded smoke test. Host-native unit tests remain a separate build path.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0 and 1 are complete, and the Phase 2 software gate is implemented. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with pinned firmware and a BCM2711 GPIO/PL011 backend. QEMU verifies the EL1 exception path; the same path still requires physical-board verification.</p>
         </section>
 
         <section id="strategy">
@@ -377,7 +377,7 @@
             </article>
             <article class="milestone foundation">
               <div class="phase-label">Phase 2</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><span class="status recommended">In progress · QEMU gate complete</span><h3>EL1 exceptions and the first Pi 4 checkpoint</h3><p>Detect the actual entry level, configure named EL2/EL3 control bits when needed, and enter EL1h. Install a 2 KiB-aligned, complete 16-slot vector table; save a full integer frame and decode ESR, ELR, SPSR, and FAR. Then add only enough BCM2711 GPIO/PL011 support and boot packaging to exercise the same path on a physical Pi.</p><div class="tags"><span class="tag">aarch64</span><span class="tag">vectors</span><span class="tag">Pi PL011</span><span class="tag">3.3 V serial</span></div><div class="exit"><strong>Exit:</strong> a deliberate <code>brk</code> reports the expected exception class and return address in QEMU and over a 3.3 V USB-to-TTL serial connection on Pi 4. Stop hardware work here until Phase 10.</div></div>
+              <div class="milestone-body"><span class="status recommended">In progress · hardware gate remains</span><h3>EL1 exceptions and the first Pi 4 checkpoint</h3><p>Detect the actual entry level, configure named EL2/EL3 control bits when needed, and enter EL1h. Install a 2 KiB-aligned, complete 16-slot vector table; save a full integer frame and decode ESR, ELR, SPSR, and FAR. The BCM2711 GPIO/PL011 backend and reproducible card image now exercise the same path on a physical Pi.</p><div class="tags"><span class="tag">aarch64</span><span class="tag">vectors</span><span class="tag">Pi PL011</span><span class="tag">3.3 V serial</span></div><div class="exit"><strong>Exit:</strong> a deliberate <code>brk</code> reports the expected exception class and return address in QEMU and over a 3.3 V USB-to-TTL serial connection on Pi 4. Stop hardware work here until Phase 10.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 3</div><div class="rail"><span class="dot"></span></div>
@@ -424,15 +424,14 @@
             <article class="card file-card"><span class="file-label">src/platform/qemu_virt/ · src/platform/rpi4/</span><h3>Board support</h3><ul><li>Platform composition and address maps.</li><li>Console, GIC configuration, block devices.</li><li>Firmware/DTB hand-off details.</li></ul></article>
             <article class="card file-card"><span class="file-label">src/formats/</span><h3>Host-testable formats</h3><ul><li>Flattened device tree, ELF64, FAT.</li><li>Slice-based parsing without MMIO.</li><li>Malformed-input and fixture tests.</li></ul></article>
             <article class="card file-card"><span class="file-label">userspace/ · src/user_runtime/</span><h3>Freestanding Zig programs</h3><ul><li>Tiny <code>_start</code>, panic, and syscall wrappers.</li><li>Static ELF programs without libc or FP/SIMD.</li><li>ABI version documented beside both sides.</li></ul></article>
-            <article class="card file-card"><span class="file-label">tools/ · scripts/</span><h3>Repeatable operations</h3><ul><li>Disk-image creation and serial smoke tests.</li><li>Generate <code>zig-out/rpi4-boot/</code> with firmware, DTB/config, kernel, and manifest.</li><li>No automated SD-device flashing in v0.</li></ul></article>
+            <article class="card file-card"><span class="file-label">tools/ · scripts/</span><h3>Repeatable operations</h3><ul><li>Disk-image creation and serial smoke tests.</li><li>Generate <code>zig-out/thekorn-os-rpi4.img</code> with firmware, DTB/config, kernel, license, and manifest.</li><li>No automated SD-device flashing in v0.</li></ul></article>
           </div>
           <div class="command">
             <span class="command-label">Planned development commands — all through the Nix shell</span>
             <pre><code>nix develop --command zig build test
 nix develop --command zig build run-virt
 nix develop --command zig build smoke-virt
-nix develop --command zig build debug-virt
-nix develop --command zig build bundle-rpi4</code></pre>
+nix develop --command zig build debug-virt</code></pre>
           </div>
           <p class="caption">Verify exact Zig 0.17 development APIs against the pinned compiler before implementing each build step; online Zig bare-bones examples age quickly.</p>
         </section>
@@ -487,7 +486,7 @@ nix develop --command zig build bundle-rpi4</code></pre>
           <article class="decision"><h3>Selective standard library use</h3><p>Use pure, freestanding-compatible <code>std</code> utilities where they help, but keep allocation, console I/O, panic, time, and synchronization kernel-owned. Do not fork <code>std</code> or couple kernel APIs to unstable hosted I/O.</p><p class="meta">Committed · All phases</p></article>
           <article class="decision"><h3>Custom Zig userspace ABI</h3><p>Use a conventional AArch64 register shape without promising Linux compatibility. User programs are freestanding Zig with a tiny project runtime; FP/SIMD remains disabled in v0.</p><p class="meta">Committed · Phases 7–8</p></article>
           <article class="decision"><h3>Initramfs before block storage</h3><p>Prove process loading from initramfs, then add virtio-blk and read-only FAT. Implement Pi SD/eMMC only after every other board feature is stable over serial.</p><p class="meta">Committed · Phases 9–10</p></article>
-          <article class="decision"><h3>Single-core v0 with a safe deployment bundle</h3><p>Keep secondary cores parked. Generate <code>zig-out/rpi4-boot/</code> for manual copying to a FAT partition; do not include an automated flashing command. SMP and a serial shell begin the post-v0 roadmap.</p><p class="meta">Committed · Through Phase 10</p></article>
+          <article class="decision"><h3>Single-core v0 with a safe deployment image</h3><p>Keep secondary cores parked. Generate <code>zig-out/thekorn-os-rpi4.img</code> for explicit writing to a spare card; do not include an automated flashing command. SMP and a serial shell begin the post-v0 roadmap.</p><p class="meta">Committed · Through Phase 10</p></article>
         </section>
 
         <section id="done">
@@ -496,7 +495,7 @@ nix develop --command zig build bundle-rpi4</code></pre>
           <div class="definition">
             <ul class="checklist">
               <li>Nix shell reproduces the pinned Zig/QEMU build.</li>
-              <li>ELF, <code>kernel8.img</code>, and a safe Pi boot bundle are generated.</li>
+              <li>ELF, <code>kernel8.img</code>, and a flashable Pi card image are generated.</li>
               <li>QEMU smoke test is deterministic and timeout-bounded.</li>
               <li>Phase 2 serial/exception gate passes on a physical Pi 4.</li>
               <li>Timer preemption preserves task state.</li>

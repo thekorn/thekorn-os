@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const uart = @import("platform/qemu_virt/uart.zig");
+const uart = @import("platform");
 const exceptions = @import("arch/aarch64/exceptions.zig");
 const Console = @import("kernel/console.zig").Console;
 const KernelConsole = Console(uart.writeByte);

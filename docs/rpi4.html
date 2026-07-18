@@ -187,6 +187,8 @@
     }
     .status-banner h2 { margin: 0 0 6px; font-size: 1.45rem; }
     .status-banner p { max-width: 850px; margin: 0; }
+    .status-banner.ready { border-color: var(--olive); background: var(--olive-soft); }
+    .status-banner.ready .status-mark { border-color: var(--olive); color: var(--olive); }
 
     .page-grid { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 56px; align-items: start; }
     main { min-width: 0; }
@@ -345,17 +347,17 @@
 
       <div class="summary-grid" aria-label="Guide summary">
         <article class="summary-card primary"><span class="meta">Board</span><strong>Pi 4 Model B</strong><span>BCM2711 · AArch64 · any RAM size</span></article>
-        <article class="summary-card"><span class="meta">Kernel artifact</span><strong><code>kernel8.img</code></strong><span>Linked for firmware load at <code>0x80000</code></span></article>
+        <article class="summary-card"><span class="meta">Flashable artifact</span><strong><code>thekorn-os-rpi4.img</code></strong><span>Complete 64 MiB SD-card image</span></article>
         <article class="summary-card"><span class="meta">Console</span><strong>115200 8N1</strong><span>PL011 · GPIO 14/15 · no flow control</span></article>
-        <article class="summary-card"><span class="meta">Current gate</span><strong>Board port missing</strong><span>Prepare hardware now; boot after Phase 2 BSP work</span></article>
+        <article class="summary-card"><span class="meta">Current gate</span><strong>Ready to flash</strong><span>Physical-board verification remains</span></article>
       </div>
     </header>
 
-    <aside class="status-banner" aria-labelledby="current-status">
-      <div class="status-mark" aria-hidden="true">!</div>
+    <aside class="status-banner ready" aria-labelledby="current-status">
+      <div class="status-mark" aria-hidden="true">✓</div>
       <div>
-        <h2 id="current-status">The generated image is not Pi-ready yet</h2>
-        <p>The build creates <code>zig-out/kernel8.img</code> at the correct Pi load address, but <code>src/main.zig</code> still imports the QEMU <code>virt</code> UART at <code>0x09000000</code>. A Pi 4 build needs a BCM2711 platform selection, GPIO 14/15 muxing, and PL011 access at <code>0xFE201000</code>. Until that exists, expect no serial output—not a usable OS.</p>
+        <h2 id="current-status">The generated image is Pi-ready</h2>
+        <p><code>zig build</code> now creates <code>zig-out/thekorn-os-rpi4.img</code>: a flashable MBR/FAT32 image containing pinned Raspberry Pi firmware and a BCM2711 kernel. The Pi build selects its own GPIO/PL011 backend at <code>0xFE201000</code>; the QEMU ELF continues to use the separate <code>virt</code> backend.</p>
       </div>
     </aside>
 
@@ -412,44 +414,44 @@
 
         <section id="tools">
           <div class="section-heading"><span class="section-number">02</span><h2>Know what is automated—and what is not</h2></div>
-          <p class="section-intro">The repository pins the compiler and QEMU, but deliberately does not flash arbitrary disks. The physical deployment bundle is planned, not implemented.</p>
+          <p class="section-intro">The repository pins the compiler, QEMU, and Raspberry Pi firmware and creates the complete card image. It deliberately never selects or writes an arbitrary disk.</p>
 
           <div class="table-wrap">
             <table>
               <thead><tr><th>Job</th><th>Tool or artifact</th><th>State today</th></tr></thead>
               <tbody>
                 <tr><td>Build AArch64 kernel</td><td><code>nix develop --command zig build</code></td><td><span class="status ready">Available</span></td></tr>
-                <tr><td>Produce Pi raw image</td><td><code>zig-out/kernel8.img</code>, linked at <code>0x80000</code></td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Produce Pi raw kernel</td><td><code>zig-out/kernel8.img</code>, linked at <code>0x80000</code></td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Produce flashable card image</td><td><code>zig-out/thekorn-os-rpi4.img</code></td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Test portable path</td><td><code>zig build smoke-virt</code> on QEMU <code>virt</code></td><td><span class="status ready">Available</span></td></tr>
-                <tr><td>Run Pi hardware devices</td><td><code>src/platform/rpi4/</code> with GPIO and PL011</td><td><span class="status missing">Must be created</span></td></tr>
-                <tr><td>Create safe boot directory</td><td>Planned <code>zig build bundle-rpi4</code> → <code>zig-out/rpi4-boot/</code></td><td><span class="status missing">Must be created</span></td></tr>
-                <tr><td>Prepare card</td><td>Raspberry Pi Imager, Disk Utility, <code>mkfs.fat</code>, or similar</td><td><span class="status manual">Manual by design</span></td></tr>
+                <tr><td>Run Pi hardware devices</td><td><code>src/platform/rpi4/</code> with GPIO and PL011</td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Prepare card</td><td>Raspberry Pi Imager or equivalent image writer</td><td><span class="status manual">Manual by design</span></td></tr>
                 <tr><td>Capture serial</td><td><code>screen</code>, <code>picocom</code>, <code>minicom</code>, or PuTTY</td><td><span class="status manual">Host-provided</span></td></tr>
               </tbody>
             </table>
           </div>
 
           <div class="command">
-            <span class="command-label">Build and validate the currently supported target</span>
+            <span class="command-label">Build both targets and validate QEMU</span>
             <pre><code>nix develop --command zig build
 nix develop --command zig build smoke-virt
-ls -lh zig-out/kernel8.img</code></pre>
+ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
             <button class="copy-button" type="button" aria-label="Copy build commands">Copy</button>
           </div>
         </section>
 
         <section id="create">
-          <div class="section-heading"><span class="section-number">03</span><h2>Create the board port before trusting the image</h2></div>
-          <p class="section-intro">The smallest useful hardware checkpoint is boot → PL011 output → deliberate exception → resume → halt. Storage, USB, HDMI, and networking can wait.</p>
+          <div class="section-heading"><span class="section-number">03</span><h2>Understand what the Pi image contains</h2></div>
+          <p class="section-intro">The image implements the smallest useful hardware checkpoint: boot → PL011 output → deliberate exception → resume → halt. Storage drivers, USB, HDMI, and networking remain outside this checkpoint.</p>
 
           <div class="steps">
             <article class="step">
               <span class="step-number">1</span>
-              <div><h3>Select the platform at compile time</h3><p>Stop importing <code>platform/qemu_virt/uart.zig</code> unconditionally. Compose the same kernel console with either the QEMU or Pi backend, while keeping board addresses out of portable kernel code.</p></div>
+              <div><h3>Platform selected at compile time</h3><p>The build composes the same kernel console with either the QEMU or Pi backend, keeping board addresses out of portable kernel code.</p></div>
             </article>
             <article class="step">
               <span class="step-number">2</span>
-              <div><h3>Add BCM2711 GPIO and PL011 initialization</h3><p>Create the Pi 4 board support under <code>src/platform/rpi4/</code>. Route GPIO 14 and 15 to UART0, configure the BCM2711 pull controls, and initialize PL011 at <code>0xFE201000</code> for <code>115200 8N1</code>. Do not copy Pi 3 pull-register code or its <code>0x3F…</code> peripheral addresses.</p></div>
+              <div><h3>BCM2711 GPIO and PL011 initialized</h3><p>The Pi backend routes GPIO 14 and 15 to UART0, configures BCM2711 pull controls, and initializes PL011 at <code>0xFE201000</code> for <code>115200 8N1</code>.</p></div>
             </article>
             <article class="step">
               <span class="step-number">3</span>
@@ -457,11 +459,11 @@ ls -lh zig-out/kernel8.img</code></pre>
             </article>
             <article class="step">
               <span class="step-number">4</span>
-              <div><h3>Build a reproducible boot bundle</h3><p>Add the planned <code>bundle-rpi4</code> step only when the BSP works. It should create <code>zig-out/rpi4-boot/</code> containing a pinned firmware/DTB set, <code>config.txt</code>, <code>kernel8.img</code>, licenses, and a manifest with checksums and source revisions.</p></div>
+              <div><h3>Build a reproducible card image</h3><p>The image includes a pinned, mutually compatible firmware/DTB set, <code>config.txt</code>, <code>kernel8.img</code>, the Broadcom license, and a firmware revision manifest.</p></div>
             </article>
             <article class="step">
               <span class="step-number">5</span>
-              <div><h3>Automate observation, not destructive flashing</h3><p>A future serial smoke script can wait for markers with a timeout and retain the transcript. Keep SD-card selection and copying explicit; the project plan intentionally excludes an automatic flash command for v0.</p></div>
+              <div><h3>Keep flashing explicit</h3><p>SD-card selection and writing remain a deliberate user action. The build creates an image file but never guesses which attached disk to overwrite.</p></div>
             </article>
           </div>
 
@@ -473,40 +475,41 @@ ls -lh zig-out/kernel8.img</code></pre>
 
         <section id="card">
           <div class="section-heading"><span class="section-number">04</span><h2>Prepare a recoverable microSD card</h2></div>
-          <p class="section-intro">Use this procedure after the Pi platform backend exists. Until <code>bundle-rpi4</code> is implemented, the safest source of compatible firmware files is a freshly imaged Raspberry Pi OS card.</p>
+          <p class="section-intro">Build once, then write the generated image as a whole. You do not need to partition the card or collect firmware files manually.</p>
 
           <div class="steps">
             <article class="step">
               <span class="step-number">1</span>
               <div>
-                <h3>Write Raspberry Pi OS Lite (64-bit) to a spare card</h3>
-                <p>Use Raspberry Pi Imager on macOS, Linux, or Windows. This gives the card a bootable FAT partition and a mutually compatible firmware, DTB, and overlay set. Double-check the selected device—the write erases it.</p>
+                <h3>Build the card image</h3>
+                <p>Run <code>nix develop --command zig build</code> and confirm that <code>zig-out/thekorn-os-rpi4.img</code> exists.</p>
               </div>
             </article>
             <article class="step">
               <span class="step-number">2</span>
               <div>
-                <h3>Back up the visible boot partition</h3>
-                <p>After imaging, eject and reinsert the card, then copy the entire boot partition to a dated directory on the host. Keep firmware files together; do not mix <code>start4.elf</code>, <code>fixup4.dat</code>, DTBs, and overlays from unrelated releases.</p>
+                <h3>Write it with Raspberry Pi Imager</h3>
+                <p>Choose <strong>Use custom</strong>, select <code>thekorn-os-rpi4.img</code>, and select a spare microSD card. Double-check the destination—the write erases the complete card.</p>
               </div>
             </article>
             <article class="step">
               <span class="step-number">3</span>
               <div>
-                <h3>Install the custom kernel and minimal configuration</h3>
-                <p>Copy <code>zig-out/kernel8.img</code> to the root of the FAT boot partition, replacing the Linux file of the same name. Replace <code>config.txt</code> with the minimal configuration below. Preserve <code>start4.elf</code>, <code>fixup4.dat</code>, <code>bcm2711-rpi-4-b.dtb</code>, and the <code>overlays/</code> directory.</p>
+                <h3>Optionally inspect the generated configuration</h3>
+                <p>The image already contains the kernel, matching pinned firmware, Pi 4 DTB, UART overlay, and this configuration:</p>
                 <div class="command">
                   <span class="command-label">config.txt — explicit Pi 4 bare-metal boot</span>
                   <pre><code>[pi4]
 arm_64bit=1
 kernel=kernel8.img
 enable_uart=1
+init_uart_clock=48000000
 dtoverlay=disable-bt
 
 [all]</code></pre>
                   <button class="copy-button" type="button" aria-label="Copy config.txt">Copy</button>
                 </div>
-                <p><code>dtoverlay=disable-bt</code> makes UART0/PL011 the primary UART on the header. The bare-metal BSP must still configure the GPIO function and UART registers itself. <code>cmdline.txt</code> is a Linux kernel command line and is not needed by this kernel.</p>
+                <p><code>dtoverlay=disable-bt</code> makes UART0/PL011 primary on the header. <code>init_uart_clock</code> fixes the clock used by the kernel's baud divisors. <code>cmdline.txt</code> is not needed.</p>
               </div>
             </article>
             <article class="step">
@@ -518,11 +521,11 @@ dtoverlay=disable-bt
           <details>
             <summary>What must be at the root of the boot partition?</summary>
             <div>
-              <p>For the recommended workflow, retain the complete boot partition produced by Raspberry Pi Imager and replace only the files named above. The Pi 4-relevant core is:</p>
+              <p>The generated FAT32 boot partition contains:</p>
               <ul>
                 <li><code>start4.elf</code> and matching <code>fixup4.dat</code> — VideoCore firmware pair.</li>
                 <li><code>bcm2711-rpi-4-b.dtb</code> — base device tree passed to the kernel after overlays.</li>
-                <li><code>overlays/disable-bt.dtbo</code> plus overlay metadata — required by the configuration shown here.</li>
+                <li><code>overlays/disable-bt.dtbo</code> — required by the configuration shown here.</li>
                 <li><code>config.txt</code> — firmware configuration.</li>
                 <li><code>kernel8.img</code> — thekorn-os raw AArch64 kernel image.</li>
               </ul>
@@ -531,7 +534,7 @@ dtoverlay=disable-bt
           </details>
           <details>
             <summary>Can I download firmware directly instead?</summary>
-            <div><p>Yes, but pin a known repository revision from <a href="https://github.com/raspberrypi/firmware/tree/master/boot">raspberrypi/firmware</a>, preserve the Broadcom and Linux license files, and record file hashes. Do not make a reproducible bundle depend on the mutable <code>master</code> branch. Raspberry Pi Imager is the lower-risk first setup because it supplies a coherent file set.</p></div>
+            <div><p>The Nix environment already downloads each required file from a pinned <a href="https://github.com/raspberrypi/firmware/tree/master/boot">raspberrypi/firmware</a> revision, verifies its hash, and includes the Broadcom license. No mutable branch is read during the build.</p></div>
           </details>
         </section>
 
@@ -641,7 +644,7 @@ picocom --baud 115200 /dev/ttyUSB0
           <p class="section-intro">Bare-metal bring-up is easiest when every attempt changes one variable and preserves the transcript.</p>
 
           <ol class="checklist" aria-label="First boot checklist">
-            <li><label><input type="checkbox" data-check="card"><span>The Pi-ready BSP is built and the card contains the new <code>kernel8.img</code>.</span></label></li>
+            <li><label><input type="checkbox" data-check="card"><span><code>thekorn-os-rpi4.img</code> is built and written to the spare card.</span></label></li>
             <li><label><input type="checkbox" data-check="power-off"><span>Pi power and adapter USB are disconnected while checking the wiring.</span></label></li>
             <li><label><input type="checkbox" data-check="voltage"><span>The adapter is confirmed for 3.3 V logic; its power pins are unused.</span></label></li>
             <li><label><input type="checkbox" data-check="crossed"><span>GND is shared; Pi TX goes to adapter RX; Pi RX goes to adapter TX.</span></label></li>
@@ -675,7 +678,7 @@ BOOT:OK</code></pre>
             <summary>Nothing appears in the terminal</summary>
             <div>
               <ol>
-                <li>Confirm this is a Pi-platform build. The repository's current QEMU UART image cannot produce Pi UART output.</li>
+                <li>Confirm you flashed <code>thekorn-os-rpi4.img</code>, not the QEMU ELF or standalone <code>kernel8.img</code>.</li>
                 <li>Check that the terminal opened the adapter that appears only when it is plugged in.</li>
                 <li>Recheck ground and the crossed TX/RX pair; try receive-only with Pi pin 8 → adapter RXD.</li>
                 <li>Confirm <code>115200 8N1</code> and disable both flow-control modes.</li>

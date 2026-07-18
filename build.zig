@@ -14,10 +14,22 @@ pub fn build(b: *std.Build) void {
         .abi = .none,
     });
 
-    const kernel = addKernel(b, "thekorn_os", kernel_target, optimize);
+    const kernel = addKernel(
+        b,
+        "thekorn_os",
+        kernel_target,
+        optimize,
+        b.path("src/platform/qemu_virt/uart.zig"),
+    );
     kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
 
-    const rpi_kernel = addKernel(b, "thekorn_os_rpi4", kernel_target, optimize);
+    const rpi_kernel = addKernel(
+        b,
+        "thekorn_os_rpi4",
+        kernel_target,
+        optimize,
+        b.path("src/platform/rpi4/uart.zig"),
+    );
     rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
 
     const install_elf = b.addInstallArtifact(kernel, .{});
@@ -26,8 +38,21 @@ pub fn build(b: *std.Build) void {
         .format = .binary,
     });
     const install_image = b.addInstallFile(image.getOutput(), "kernel8.img");
+    const rpi_disk = b.addSystemCommand(&.{"bash"});
+    rpi_disk.addFileArg(b.path("scripts/make-rpi4-image.sh"));
+    rpi_disk.addFileArg(image.getOutput());
+    rpi_disk.addFileArg(b.path("scripts/rpi4-config.txt"));
+    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_START4"));
+    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_FIXUP4"));
+    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_DTB"));
+    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_DISABLE_BT"));
+    rpi_disk.addFileArg(requiredEnvPath(b, "RPI_FIRMWARE_LICENSE"));
+    rpi_disk.addArg(requiredEnv(b, "RPI_FIRMWARE_REVISION"));
+    const rpi_disk_output = rpi_disk.addOutputFileArg("thekorn-os-rpi4.img");
+    const install_rpi_disk = b.addInstallFile(rpi_disk_output, "thekorn-os-rpi4.img");
     b.getInstallStep().dependOn(&install_elf.step);
     b.getInstallStep().dependOn(&install_image.step);
+    b.getInstallStep().dependOn(&install_rpi_disk.step);
 
     addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", kernel, false);
     addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", kernel, true);
@@ -43,6 +68,14 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = b.graph.host,
             .optimize = if (coverage) .Debug else optimize,
+            .imports = &.{.{
+                .name = "platform",
+                .module = b.createModule(.{
+                    .root_source_file = b.path("src/platform/qemu_virt/uart.zig"),
+                    .target = b.graph.host,
+                    .optimize = if (coverage) .Debug else optimize,
+                }),
+            }},
         }),
         .test_runner = .{
             .path = b.path("src/test_runner.zig"),
@@ -111,11 +144,22 @@ pub fn build(b: *std.Build) void {
     });
 }
 
+fn requiredEnvPath(b: *std.Build, name: []const u8) std.Build.LazyPath {
+    return b.graph.cwdRelativePath(requiredEnv(b, name));
+}
+
+fn requiredEnv(b: *std.Build, name: []const u8) []const u8 {
+    return b.graph.environ_map.get(name) orelse {
+        std.debug.panic("{s} is unset; run Zig through nix develop", .{name});
+    };
+}
+
 fn addKernel(
     b: *std.Build,
     name: []const u8,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    platform: std.Build.LazyPath,
 ) *std.Build.Step.Compile {
     const kernel = b.addExecutable(.{
         .name = name,
@@ -124,6 +168,14 @@ fn addKernel(
             .target = target,
             .optimize = optimize,
             .strip = false,
+            .imports = &.{.{
+                .name = "platform",
+                .module = b.createModule(.{
+                    .root_source_file = platform,
+                    .target = target,
+                    .optimize = optimize,
+                }),
+            }},
         }),
     });
     kernel.entry = .{ .symbol_name = "_start" };
