@@ -33,7 +33,7 @@ pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c)
     }
     KernelConsole.write("EXCEPTION:RETURNED\n");
 
-    if (uart.supports_timer_interrupts) {
+    if (builtin.cpu.arch == .aarch64 and uart.supports_timer_interrupts) {
         uart.gic.init();
         timer.init(timer_tick_limit);
         enableInterrupts();
@@ -95,7 +95,7 @@ fn memoryFailed() noreturn {
 }
 
 pub export fn exceptionHandler(vector: usize, frame: *exceptions.Frame) callconv(.c) void {
-    if (uart.supports_timer_interrupts and vector == 5) {
+    if (builtin.cpu.arch == .aarch64 and uart.supports_timer_interrupts and vector == 5) {
         handleIrq();
         return;
     }
