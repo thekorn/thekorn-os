@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) void {
                 }),
             }},
         }),
+        .use_llvm = if (coverage) true else null,
         .test_runner = .{
             .path = b.path("src/test_runner.zig"),
             .mode = .simple,
