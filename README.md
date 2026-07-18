@@ -63,6 +63,14 @@ Run the kernel interactively on QEMU `virt`:
 nix develop --command zig build run-virt
 ```
 
+To show the serial output in the QEMU graphical virtual console instead, run:
+
+```sh
+nix develop --command zig build run-virt-gui
+```
+
+Switch to the serial console with Ctrl+Alt+2 (Ctrl+Option+2 on macOS).
+
 Run the timeout-bounded serial smoke test:
 
 ```sh

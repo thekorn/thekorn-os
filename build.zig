@@ -53,8 +53,9 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&install_image.step);
     b.getInstallStep().dependOn(&install_rpi_disk.step);
 
-    addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", kernel, false);
-    addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", kernel, true);
+    addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", kernel, false, false);
+    addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", kernel, false, true);
+    addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", kernel, true, false);
 
     const smoke = b.addSystemCommand(&.{"bash"});
     smoke.addFileArg(b.path("scripts/smoke-virt.sh"));
@@ -179,6 +180,7 @@ fn addQemuStep(
     description: []const u8,
     kernel: *std.Build.Step.Compile,
     debug: bool,
+    gui: bool,
 ) void {
     const qemu = b.addSystemCommand(&.{
         "qemu-system-aarch64",
@@ -190,9 +192,13 @@ fn addQemuStep(
         "1",
         "-m",
         "128M",
-        "-nographic",
-        "-kernel",
     });
+    if (gui) {
+        qemu.addArgs(&.{ "-monitor", "none", "-serial", "vc:2048x1536" });
+    } else {
+        qemu.addArg("-nographic");
+    }
+    qemu.addArg("-kernel");
     qemu.addFileArg(kernel.getEmittedBin());
     if (debug) qemu.addArgs(&.{ "-S", "-s" });
 
