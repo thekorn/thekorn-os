@@ -1,0 +1,6 @@
+# Load the kernel as AArch64 and keep PL011 UART0 available on GPIO 14/15.
+arm_64bit=1
+kernel=kernel8.img
+enable_uart=1
+init_uart_clock=48000000
+uart_2ndstage=1

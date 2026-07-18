@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0 and 1 are complete. The project now builds a symbol-rich freestanding AArch64 ELF and <code>kernel8.img</code>, boots through <code>_start</code> into Zig on QEMU <code>virt</code>, reports boot facts over PL011, and verifies deterministic boot and panic markers with a timeout-bounded smoke test. Host-native unit tests remain a separate build path.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0 and 1 are complete. The Phase 2 software gate now builds platform-selected QEMU and Raspberry Pi 4 PL011 kernels, packages <code>kernel8.img</code> with an explicit <code>config.txt</code>, and verifies the EL1 exception path with a timeout-bounded QEMU smoke test. Physical Pi 4 serial validation remains before Phase 2 can close. Host-native unit tests remain a separate build path.</p>
         </section>
 
         <section id="strategy">
@@ -377,7 +377,7 @@
             </article>
             <article class="milestone foundation">
               <div class="phase-label">Phase 2</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><span class="status recommended">In progress · QEMU gate complete</span><h3>EL1 exceptions and the first Pi 4 checkpoint</h3><p>Detect the actual entry level, configure named EL2/EL3 control bits when needed, and enter EL1h. Install a 2 KiB-aligned, complete 16-slot vector table; save a full integer frame and decode ESR, ELR, SPSR, and FAR. Then add only enough BCM2711 GPIO/PL011 support and boot packaging to exercise the same path on a physical Pi.</p><div class="tags"><span class="tag">aarch64</span><span class="tag">vectors</span><span class="tag">Pi PL011</span><span class="tag">3.3 V serial</span></div><div class="exit"><strong>Exit:</strong> a deliberate <code>brk</code> reports the expected exception class and return address in QEMU and over a 3.3 V USB-to-TTL serial connection on Pi 4. Stop hardware work here until Phase 10.</div></div>
+              <div class="milestone-body"><span class="status recommended">In progress · hardware-ready</span><h3>EL1 exceptions and the first Pi 4 checkpoint</h3><p>Detect the actual entry level, configure named EL2/EL3 control bits when needed, and enter EL1h. Install a 2 KiB-aligned, complete 16-slot vector table; save a full integer frame and decode ESR, ELR, SPSR, and FAR. BCM2711 GPIO/PL011 support and safe boot packaging now exercise the same path; physical serial validation remains.</p><div class="tags"><span class="tag">aarch64</span><span class="tag">vectors</span><span class="tag">Pi PL011</span><span class="tag">3.3 V serial</span></div><div class="exit"><strong>Exit:</strong> a deliberate <code>brk</code> reports the expected exception class and return address in QEMU and over a 3.3 V USB-to-TTL serial connection on Pi 4. Stop hardware work here until Phase 10.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 3</div><div class="rail"><span class="dot"></span></div>

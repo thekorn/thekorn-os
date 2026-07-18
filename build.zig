@@ -14,10 +14,22 @@ pub fn build(b: *std.Build) void {
         .abi = .none,
     });
 
-    const kernel = addKernel(b, "thekorn_os", kernel_target, optimize);
+    const kernel = addKernel(
+        b,
+        "thekorn_os",
+        "src/platform/qemu_virt/uart.zig",
+        kernel_target,
+        optimize,
+    );
     kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
 
-    const rpi_kernel = addKernel(b, "thekorn_os_rpi4", kernel_target, optimize);
+    const rpi_kernel = addKernel(
+        b,
+        "thekorn_os_rpi4",
+        "src/platform/rpi4/uart.zig",
+        kernel_target,
+        optimize,
+    );
     rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
 
     const install_elf = b.addInstallArtifact(kernel, .{});
@@ -25,9 +37,21 @@ pub fn build(b: *std.Build) void {
         .basename = "kernel8.img",
         .format = .binary,
     });
-    const install_image = b.addInstallFile(image.getOutput(), "kernel8.img");
+    const install_image = b.addInstallFile(image.getOutput(), "rpi4-boot/kernel8.img");
+    const install_config = b.addInstallFile(
+        b.path("src/platform/rpi4/config.txt"),
+        "rpi4-boot/config.txt",
+    );
     b.getInstallStep().dependOn(&install_elf.step);
     b.getInstallStep().dependOn(&install_image.step);
+    b.getInstallStep().dependOn(&install_config.step);
+
+    const bundle_rpi4 = b.step(
+        "bundle-rpi4",
+        "Build the Raspberry Pi 4 FAT boot partition files",
+    );
+    bundle_rpi4.dependOn(&install_image.step);
+    bundle_rpi4.dependOn(&install_config.step);
 
     addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", kernel, false);
     addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", kernel, true);
@@ -43,6 +67,14 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = b.graph.host,
             .optimize = if (coverage) .Debug else optimize,
+            .imports = &.{.{
+                .name = "platform",
+                .module = b.createModule(.{
+                    .root_source_file = b.path("src/platform/qemu_virt/uart.zig"),
+                    .target = b.graph.host,
+                    .optimize = if (coverage) .Debug else optimize,
+                }),
+            }},
         }),
         .test_runner = .{
             .path = b.path("src/test_runner.zig"),
@@ -114,9 +146,15 @@ pub fn build(b: *std.Build) void {
 fn addKernel(
     b: *std.Build,
     name: []const u8,
+    platform_source: []const u8,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Step.Compile {
+    const platform = b.createModule(.{
+        .root_source_file = b.path(platform_source),
+        .target = target,
+        .optimize = optimize,
+    });
     const kernel = b.addExecutable(.{
         .name = name,
         .root_module = b.createModule(.{
@@ -124,6 +162,10 @@ fn addKernel(
             .target = target,
             .optimize = optimize,
             .strip = false,
+            .imports = &.{.{
+                .name = "platform",
+                .module = platform,
+            }},
         }),
     });
     kernel.entry = .{ .symbol_name = "_start" };
