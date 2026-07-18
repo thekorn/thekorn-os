@@ -6,8 +6,9 @@ config=$2
 start4=$3
 fixup4=$4
 firmware_license=$5
-firmware_revision=$6
-image=$7
+dtb=$6
+firmware_revision=$7
+image=$8
 readonly image_size=$((64 * 1024 * 1024))
 readonly partition_offset=$((1024 * 1024))
 
@@ -40,12 +41,14 @@ mcopy -i "$drive" "$config" ::config.txt
 mcopy -i "$drive" "$start4" ::start4.elf
 mcopy -i "$drive" "$fixup4" ::fixup4.dat
 mcopy -i "$drive" "$firmware_license" ::LICENCE.broadcom
+mcopy -i "$drive" "$dtb" ::bcm2711-rpi-4-b.dtb
 
 manifest=$(mktemp)
 trap 'rm -f "$manifest"' EXIT
 {
   echo "Raspberry Pi firmware release: $firmware_revision"
   echo "Kernel: kernel8.img"
+  echo "Device tree: bcm2711-rpi-4-b.dtb"
   echo "Target: Raspberry Pi 4 Model B (BCM2711)"
 } >"$manifest"
 mcopy -i "$drive" "$manifest" ::MANIFEST.txt

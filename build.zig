@@ -47,6 +47,10 @@ pub fn build(b: *std.Build) void {
     rpi_disk.addFileArg(rpi_firmware.path("boot/start4.elf"));
     rpi_disk.addFileArg(rpi_firmware.path("boot/fixup4.dat"));
     rpi_disk.addFileArg(rpi_firmware.path("boot/LICENCE.broadcom"));
+    const rpi_dtb = b.addSystemCommand(&.{"python3"});
+    rpi_dtb.addFileArg(b.path("scripts/fetch-rpi4-dtb.py"));
+    const rpi_dtb_output = rpi_dtb.addOutputFileArg("bcm2711-rpi-4-b.dtb");
+    rpi_disk.addFileArg(rpi_dtb_output);
     rpi_disk.addArg("1.20260521");
     const rpi_disk_output = rpi_disk.addOutputFileArg("thekorn-os-rpi4.img");
     const install_rpi_disk = b.addInstallFile(rpi_disk_output, "thekorn-os-rpi4.img");
@@ -54,13 +58,14 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&install_image.step);
     b.getInstallStep().dependOn(&install_rpi_disk.step);
 
-    addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", kernel, false, false);
-    addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", kernel, false, true);
-    addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", kernel, true, false);
+    const qemu_image = kernel.addObjCopy(.{ .format = .binary });
+    addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", qemu_image.getOutput(), false, false);
+    addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", qemu_image.getOutput(), false, true);
+    addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", qemu_image.getOutput(), true, false);
 
     const smoke = b.addSystemCommand(&.{"bash"});
     smoke.addFileArg(b.path("scripts/smoke-virt.sh"));
-    smoke.addFileArg(kernel.getEmittedBin());
+    smoke.addFileArg(qemu_image.getOutput());
     const smoke_step = b.step("smoke-virt", "Boot QEMU and verify the serial marker");
     smoke_step.dependOn(&smoke.step);
 
@@ -179,7 +184,7 @@ fn addQemuStep(
     b: *std.Build,
     name: []const u8,
     description: []const u8,
-    kernel: *std.Build.Step.Compile,
+    kernel: std.Build.LazyPath,
     debug: bool,
     gui: bool,
 ) void {
@@ -200,7 +205,7 @@ fn addQemuStep(
         qemu.addArg("-nographic");
     }
     qemu.addArg("-kernel");
-    qemu.addFileArg(kernel.getEmittedBin());
+    qemu.addFileArg(kernel);
     if (debug) qemu.addArgs(&.{ "-S", "-s" });
 
     const step = b.step(name, description);

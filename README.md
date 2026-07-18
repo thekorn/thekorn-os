@@ -11,6 +11,8 @@ install a complete AArch64 exception vector table, initialize their platform's
 PL011 UART, and report boot and exception facts over serial. On QEMU, the
 kernel also handles generic physical timer interrupts through a GICv2. See [the
 implementation plan](docs/plan.html) for the roadmap and current phase status.
+Both targets consume the firmware-provided device tree to discover RAM and
+reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
 
 ## Requirements
 
@@ -19,8 +21,10 @@ implementation plan](docs/plan.html) for the roadmap and current phase status.
   `x86_64-linux`)
 
 The Nix flake supplies the pinned compiler and host tools on
-`aarch64-darwin`, `aarch64-linux`, and `x86_64-linux`. It does not supply
-project inputs: Zig fetches those from `build.zig.zon` into `zig-pkg/`.
+`aarch64-darwin`, `aarch64-linux`, and `x86_64-linux`. Zig fetches packaged
+project inputs from `build.zig.zon` into `zig-pkg/`; the Pi image build also
+downloads the matching board DTB from the pinned firmware tag and verifies its
+SHA-256 digest before use.
 
 ## Build
 
@@ -35,7 +39,7 @@ and debug information in the ELF. It creates:
 - `zig-out/kernel8.img` — raw Raspberry Pi 4 kernel linked at `0x80000`
 - `zig-out/thekorn-os-rpi4.img` — 64 MiB Pi-ready SD-card image with an MBR,
   FAT32 boot partition, the pinned Raspberry Pi firmware release, and the Pi
-  kernel
+  kernel and BCM2711 device tree
 
 Write `zig-out/thekorn-os-rpi4.img` to a spare microSD card with the **Use
 custom** action in Raspberry Pi Imager or an equivalent image writer. This
@@ -106,6 +110,8 @@ instruction. It then routes the generic physical timer through the GICv2,
 checks monotonic progress through exactly 1,000 allocation- and logging-free
 interrupts, and emits `IRQ:OK` followed by `BOOT:OK`. QEMU is terminated
 automatically by the smoke-test timeout.
+Before exception testing, it parses the QEMU DTB, reserves firmware, DTB, and
+kernel-owned memory, sweeps all allocatable frames, and emits `MEMORY:OK`.
 
 ## Debug
 
@@ -129,3 +135,5 @@ and Zig source locations.
   GPIO/PL011 image are implemented; physical-board verification remains
 - Phase 3: complete — QEMU GICv2 routing, generic physical timer interrupts,
   monotonic tick accounting, and the 1,000-tick smoke-test gate
+- Phase 4: complete — DTB RAM/reservation discovery, 4 KiB bitmap frame
+  allocation, host tests, and the QEMU allocation-sweep gate

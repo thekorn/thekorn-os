@@ -3,11 +3,15 @@ const builtin = @import("builtin");
 const uart = @import("platform");
 const exceptions = @import("arch/aarch64/exceptions.zig");
 const timer = @import("arch/aarch64/timer.zig");
+const fdt = @import("formats/fdt.zig");
+const physical_memory = @import("kernel/physical_memory.zig");
 const Console = @import("kernel/console.zig").Console;
 const KernelConsole = Console(uart.writeByte);
 
 const timer_tick_limit = 1_000;
+const max_dtb_size = 2 * 1024 * 1024;
 var unexpected_interrupts: usize = 0;
+var frame_bitmap: [256 * 1024]u8 = undefined;
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
@@ -21,6 +25,7 @@ pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c)
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_start),
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_end),
     );
+    initializeMemory(dtb);
     if (builtin.cpu.arch == .aarch64) {
         asm volatile ("brk #0");
     } else {
@@ -53,6 +58,39 @@ pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c)
         KernelConsole.write("IRQ:OK\n");
     }
     KernelConsole.write("BOOT:OK\n");
+    halt();
+}
+
+fn initializeMemory(dtb_address: usize) void {
+    if (dtb_address == 0 or dtb_address % 8 != 0 or dtb_address > std.math.maxInt(usize) - 40) memoryFailed();
+    const header: [*]const u8 = @ptrFromInt(dtb_address);
+    const total_size = fdt.blobSize(header[0..40]) catch memoryFailed();
+    if (total_size > max_dtb_size or dtb_address > std.math.maxInt(usize) - total_size) memoryFailed();
+    const info = fdt.parse(header[0..total_size]) catch memoryFailed();
+    var allocator = physical_memory.Allocator.init(&frame_bitmap, info.ram[0..info.ram_count]) catch memoryFailed();
+    for (info.reservations[0..info.reservation_count]) |range| allocator.reserve(range) catch memoryFailed();
+    allocator.reserve(.{ .address = dtb_address, .size = total_size }) catch memoryFailed();
+    const kernel_start = if (builtin.is_test) 0 else @intFromPtr(&__kernel_start);
+    const kernel_end = if (builtin.is_test) 0 else @intFromPtr(&__kernel_end);
+    allocator.reserve(.{ .address = kernel_start, .size = kernel_end - kernel_start }) catch memoryFailed();
+
+    KernelConsole.writeHex("MEMORY:DTB_SIZE=", total_size);
+    KernelConsole.writeHex("MEMORY:RAM_RANGES=", info.ram_count);
+    KernelConsole.writeHex("MEMORY:FRAMES=", allocator.frame_count);
+    var allocated: usize = 0;
+    while (allocator.allocate()) |frame| {
+        for (allocator.reservations[0..allocator.reservation_count]) |range| {
+            if (frame < range.address + range.size and frame + physical_memory.page_size > range.address) memoryFailed();
+        }
+        allocated += 1;
+    }
+    if (allocated == 0) memoryFailed();
+    KernelConsole.writeHex("MEMORY:ALLOCATED=", allocated);
+    KernelConsole.write("MEMORY:OK\n");
+}
+
+fn memoryFailed() noreturn {
+    KernelConsole.write("MEMORY:FAILED\n");
     halt();
 }
 

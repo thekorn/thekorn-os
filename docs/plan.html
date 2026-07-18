@@ -260,7 +260,7 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: Phase 3 complete · Phase 2 awaits hardware verification</span>
+            <span class="meta">Status: Phase 4 complete · Phase 2 awaits hardware verification</span>
             <span class="meta">Updated: 2026-07-18</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0, 1, and 3 are complete, and the Phase 2 software gate is implemented. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. QEMU verifies the EL1 exception path and 1,000 generic physical timer interrupts through its GICv2; the Pi exception path still requires physical-board verification.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0, 1, 3, and 4 are complete, and the Phase 2 software gate is implemented. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. QEMU verifies DTB-based memory discovery and frame allocation, the EL1 exception path, and 1,000 generic physical timer interrupts through its GICv2; the Pi exception path still requires physical-board verification.</p>
         </section>
 
         <section id="strategy">
@@ -385,7 +385,7 @@
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 4</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><h3>DTB and physical frame allocation</h3><p>Until this phase, use minimal compile-time platform constants and only preserve the DTB. Now parse enough flattened device tree data to discover RAM and reservations. Reserve kernel, stacks, DTB, and bootstrap tables. Add a bitmap allocator for 4 KiB frames with range and double-free assertions.</p><div class="tags"><span class="tag">FDT</span><span class="tag">page bitmap</span><span class="tag">host tests</span></div><div class="exit"><strong>Exit:</strong> native stress tests pass, and a boot-time allocation sweep never returns a reserved frame.</div></div>
+              <div class="milestone-body"><span class="status recommended">Complete</span><h3>DTB and physical frame allocation</h3><p>Parse flattened device tree RAM and reservations, reserve the kernel and DTB, and manage 4 KiB physical frames with a caller-backed bitmap. Bootstrap tables will be reserved when they exist.</p><div class="tags"><span class="tag">FDT</span><span class="tag">page bitmap</span><span class="tag">host tests</span></div><div class="exit"><strong>Exit verified:</strong> native allocator and parser tests pass, and the QEMU boot-time allocation sweep emits <code>MEMORY:OK</code> without returning a reserved frame. Pi hardware verification remains separate.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 5</div><div class="rail"><span class="dot"></span></div>

@@ -33,6 +33,7 @@ fi
 
 previous_line=0
 for marker in \
+  '^MEMORY:OK' \
   '^EXCEPTION:VECTOR=0x0000000000000004' \
   '^EXCEPTION:EC=0x000000000000003c' \
   '^EXCEPTION:BRK' \
