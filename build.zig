@@ -11,6 +11,7 @@ pub fn build(b: *std.Build) void {
     const rpi_firmware = b.dependency("raspberrypi_firmware", .{});
     const kernel_target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
+        .cpu_features_sub = std.Target.aarch64.featureSet(&.{ .fp_armv8, .neon }),
         .os_tag = .freestanding,
         .abi = .none,
     });

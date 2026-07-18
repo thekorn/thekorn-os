@@ -260,7 +260,7 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: implementation in progress · Phase 2 awaits hardware verification</span>
+            <span class="meta">Status: Phase 3 complete · Phase 2 awaits hardware verification</span>
             <span class="meta">Updated: 2026-07-18</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0 and 1 are complete, and the Phase 2 software gate is implemented. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. QEMU verifies the EL1 exception path; the same path still requires physical-board verification.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0, 1, and 3 are complete, and the Phase 2 software gate is implemented. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. QEMU verifies the EL1 exception path and 1,000 generic physical timer interrupts through its GICv2; the Pi exception path still requires physical-board verification.</p>
         </section>
 
         <section id="strategy">
@@ -381,7 +381,7 @@
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 3</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><h3>Generic timer and GIC interrupts</h3><p>Build a GICv2 implementation for QEMU <code>virt</code>, route the Arm generic physical timer, acknowledge/end interrupts correctly, and keep timer handlers allocation- and logging-free.</p><div class="tags"><span class="tag">GICv2</span><span class="tag">CNTP</span><span class="tag">IRQ</span></div><div class="exit"><strong>Exit:</strong> 1,000 ticks arrive with preserved registers, monotonic time, and no unhandled interrupt.</div></div>
+              <div class="milestone-body"><span class="status recommended">Complete</span><h3>Generic timer and GIC interrupts</h3><p>Build a GICv2 implementation for QEMU <code>virt</code>, route the Arm generic physical timer, acknowledge/end interrupts correctly, and keep timer handlers allocation- and logging-free.</p><div class="tags"><span class="tag">GICv2</span><span class="tag">CNTP</span><span class="tag">IRQ</span></div><div class="exit"><strong>Exit verified:</strong> 1,000 ticks arrive with preserved registers, monotonic time, and no unhandled interrupt.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 4</div><div class="rail"><span class="dot"></span></div>

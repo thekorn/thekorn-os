@@ -11,6 +11,9 @@
 //! - Arm PrimeCell UART (PL011) Technical Reference Manual, Programmer's Model:
 //!   https://developer.arm.com/documentation/ddi0183/latest/
 
+pub const supports_timer_interrupts = true;
+pub const gic = @import("gic.zig");
+
 // QEMU VIRT_UART0: guest physical address 0x0900_0000, region size 0x1000.
 const base = 0x0900_0000;
 

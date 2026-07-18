@@ -8,9 +8,9 @@ The current implementation boots a freestanding kernel in writable QEMU
 `virt` RAM at `0x40080000` and produces a separately linked, flashable
 Raspberry Pi 4 image whose kernel loads at `0x80000`. Both targets enter EL1h,
 install a complete AArch64 exception vector table, initialize their platform's
-PL011 UART, and report boot and exception facts over serial. See
-[the implementation plan](docs/plan.html) for the roadmap and current phase
-status.
+PL011 UART, and report boot and exception facts over serial. On QEMU, the
+kernel also handles generic physical timer interrupts through a GICv2. See [the
+implementation plan](docs/plan.html) for the roadmap and current phase status.
 
 ## Requirements
 
@@ -100,10 +100,12 @@ summary and the five slowest tests. Set `TEST_VERBOSE=false` for compact output,
 run matching named tests. Tests named `tests:beforeAll` and `tests:afterAll` are
 run as suite setup and teardown hooks.
 
-The current Phase 2 QEMU checkpoint emits `BOOT:OK`, handles a deliberate
-`brk` through the EL1h synchronous vector, reports ESR/ELR/SPSR/FAR, resumes
-after the trapped instruction, and then halts. QEMU is terminated automatically
-by the smoke-test timeout.
+The current QEMU checkpoint handles a deliberate `brk` through the EL1h
+synchronous vector, reports ESR/ELR/SPSR/FAR, and resumes after the trapped
+instruction. It then routes the generic physical timer through the GICv2,
+checks monotonic progress through exactly 1,000 allocation- and logging-free
+interrupts, and emits `IRQ:OK` followed by `BOOT:OK`. QEMU is terminated
+automatically by the smoke-test timeout.
 
 ## Debug
 
@@ -125,3 +127,5 @@ and Zig source locations.
   automated smoke test
 - Phase 2: in progress — QEMU EL1 exception handling and the Raspberry Pi 4
   GPIO/PL011 image are implemented; physical-board verification remains
+- Phase 3: complete — QEMU GICv2 routing, generic physical timer interrupts,
+  monotonic tick accounting, and the 1,000-tick smoke-test gate

@@ -37,6 +37,9 @@ for marker in \
   '^EXCEPTION:EC=0x000000000000003c' \
   '^EXCEPTION:BRK' \
   '^EXCEPTION:RETURNED' \
+  '^TIMER:TICKS=0x00000000000003e8' \
+  '^TIMER:MONOTONIC' \
+  '^IRQ:OK' \
   '^BOOT:OK'
 do
   line=$(grep -n -m1 "$marker" "$transcript" | cut -d: -f1 || true)
