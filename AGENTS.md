@@ -25,3 +25,5 @@ nix develop --command zig build test
 
 Keep `README.md` current whenever build commands, run/debug workflows, generated
 artifacts, requirements, or implementation phase status change.
+
+For the project plan see [the plan](docs/plan.html)
