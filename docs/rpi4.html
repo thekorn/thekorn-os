@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Practical Raspberry Pi 4 hardware, SD-card, firmware, and UART setup guide for thekorn-os.">
+  <title>thekorn-os on Raspberry Pi 4 — hardware setup guide</title>
+  <script>
+    (function () {
+      var saved = localStorage.getItem("thekorn-theme");
+      var dark = saved ? saved === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+      if (dark) document.documentElement.classList.add("dark");
+    }());
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #faf9f5;
+      --surface: #ffffff;
+      --surface-soft: #f0eee6;
+      --ink: #141413;
+      --body: #3d3d3a;
+      --muted: #6f6e68;
+      --line: #d1cfc5;
+      --line-strong: #aaa79c;
+      --clay: #d97757;
+      --clay-soft: #f8e9e2;
+      --olive: #687b4e;
+      --olive-soft: #e9eee2;
+      --rust: #a83f35;
+      --rust-soft: #f8e3e0;
+      --oat: #e3dacc;
+      --code: #242421;
+      --code-ink: #f5f1e8;
+      --focus: #226db4;
+      --shadow: 0 16px 42px rgba(31, 29, 24, .06);
+    }
+
+    html.dark {
+      color-scheme: dark;
+      --page: #171816;
+      --surface: #20211e;
+      --surface-soft: #292a26;
+      --ink: #f4f1e8;
+      --body: #d5d2c8;
+      --muted: #aaa89f;
+      --line: #3c3d38;
+      --line-strong: #5d5e56;
+      --clay: #e18a6d;
+      --clay-soft: #3d2922;
+      --olive: #a4b78a;
+      --olive-soft: #293226;
+      --rust: #ef8a80;
+      --rust-soft: #3f2523;
+      --oat: #4a4035;
+      --code: #0f100f;
+      --code-ink: #f5f1e8;
+      --focus: #79b7ee;
+      --shadow: none;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--body);
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: inherit; text-decoration-color: var(--clay); text-underline-offset: 3px; }
+    a:hover { color: var(--ink); }
+    button, summary { font: inherit; }
+    button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
+    }
+    code, pre, .mono, .eyebrow, .meta, .step-number, .pin, .status {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    code {
+      padding: .12em .34em;
+      border-radius: 4px;
+      background: var(--surface-soft);
+      color: var(--ink);
+      font-size: .91em;
+    }
+    h1, h2, h3 {
+      margin-top: 0;
+      color: var(--ink);
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.12;
+      letter-spacing: -.018em;
+    }
+    h1 { max-width: 780px; margin-bottom: 18px; font-size: clamp(2.5rem, 6vw, 4.8rem); }
+    h2 { margin-bottom: 14px; font-size: clamp(1.8rem, 3vw, 2.55rem); }
+    h3 { margin-bottom: 8px; font-size: 1.18rem; }
+    p { margin: 0 0 1em; }
+    ul, ol { margin: .5em 0 1em; padding-left: 1.25em; }
+    li + li { margin-top: .34em; }
+    strong { color: var(--ink); }
+
+    .skip-link {
+      position: fixed;
+      z-index: 20;
+      top: 10px;
+      left: 10px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: var(--ink);
+      color: var(--page);
+      transform: translateY(-150%);
+    }
+    .skip-link:focus { transform: none; }
+    .topbar {
+      position: sticky;
+      z-index: 10;
+      top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 58px;
+      padding: 10px clamp(18px, 4vw, 48px);
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+      background: color-mix(in srgb, var(--page) 92%, transparent);
+      backdrop-filter: blur(12px);
+    }
+    .brand { color: var(--ink); font-weight: 760; letter-spacing: -.01em; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .mini-link { color: var(--muted); font-size: 13px; }
+    .theme-toggle, .copy-button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .theme-toggle { width: 36px; height: 34px; }
+
+    .shell { width: min(1180px, calc(100% - 36px)); margin: 0 auto; }
+    .hero { padding: clamp(62px, 10vw, 112px) 0 54px; }
+    .eyebrow {
+      margin-bottom: 18px;
+      color: var(--clay);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .lede { max-width: 730px; color: var(--body); font-size: clamp(1.05rem, 2vw, 1.3rem); }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 40px;
+    }
+    .summary-card {
+      min-height: 126px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .summary-card.primary { border-top: 3px solid var(--clay); }
+    .summary-card strong { display: block; margin: 7px 0 4px; font-size: 1.18rem; }
+    .meta { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+
+    .status-banner {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 18px;
+      margin: 0 0 46px;
+      padding: 22px;
+      border: 1px solid var(--rust);
+      border-radius: 12px;
+      background: var(--rust-soft);
+    }
+    .status-mark {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border: 2px solid var(--rust);
+      border-radius: 50%;
+      color: var(--rust);
+      font: 800 22px/1 Georgia, serif;
+    }
+    .status-banner h2 { margin: 0 0 6px; font-size: 1.45rem; }
+    .status-banner p { max-width: 850px; margin: 0; }
+
+    .page-grid { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 56px; align-items: start; }
+    main { min-width: 0; }
+    section { scroll-margin-top: 82px; padding: 56px 0; border-top: 1px solid var(--line); }
+    .section-heading { display: flex; gap: 15px; align-items: flex-start; }
+    .section-number {
+      flex: 0 0 auto;
+      margin-top: 5px;
+      color: var(--clay);
+      font: 750 12px/1 ui-monospace, monospace;
+      letter-spacing: .08em;
+    }
+    .section-intro { max-width: 720px; margin-bottom: 26px; color: var(--muted); font-size: 1.04rem; }
+    .toc {
+      position: sticky;
+      top: 84px;
+      padding: 18px 0;
+      border-top: 2px solid var(--ink);
+    }
+    .toc a { display: block; padding: 6px 0; color: var(--muted); font-size: 13px; text-decoration: none; }
+    .toc a:hover, .toc a.active { color: var(--ink); }
+    .toc a.active { font-weight: 700; }
+
+    .card-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .card {
+      padding: 21px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .status {
+      display: inline-block;
+      margin-bottom: 13px;
+      padding: 4px 7px;
+      border-radius: 4px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .status.ready { background: var(--olive-soft); color: var(--olive); }
+    .status.missing { background: var(--rust-soft); color: var(--rust); }
+    .status.manual { background: var(--clay-soft); color: var(--clay); }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 14px; }
+    th, td { padding: 14px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--ink); font-size: 12px; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+
+    .steps { display: grid; gap: 13px; }
+    .step { display: grid; grid-template-columns: 42px 1fr; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .step-number { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: var(--clay-soft); color: var(--clay); font-weight: 800; }
+    .step h3 { margin-top: 4px; }
+    .step p:last-child { margin-bottom: 0; }
+
+    .callout { margin: 20px 0; padding: 18px 20px; border-left: 4px solid var(--clay); background: var(--clay-soft); }
+    .callout.safe { border-left-color: var(--olive); background: var(--olive-soft); }
+    .callout.danger { border-left-color: var(--rust); background: var(--rust-soft); }
+    .callout p:last-child { margin-bottom: 0; }
+
+    .command {
+      position: relative;
+      margin: 14px 0;
+      overflow: hidden;
+      border: 1px solid #3c3c38;
+      border-radius: 9px;
+      background: var(--code);
+      color: var(--code-ink);
+    }
+    .command-label { display: block; padding: 9px 13px; border-bottom: 1px solid #3c3c38; color: #aaa89f; font: 11px/1.4 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .06em; }
+    pre { margin: 0; padding: 16px 54px 16px 16px; overflow-x: auto; font-size: 13px; line-height: 1.65; }
+    pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
+    .copy-button { position: absolute; top: 43px; right: 10px; padding: 5px 8px; border-color: #54544e; background: #31312d; color: #dedbd2; font-size: 11px; }
+
+    .wiring {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+    .diagram-panel, .pin-panel { padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .diagram-panel svg { display: block; width: 100%; height: auto; }
+    .wire { fill: none; stroke-width: 5; stroke-linecap: round; }
+    .wire-ground { stroke: var(--body); }
+    .wire-tx { stroke: var(--clay); }
+    .wire-rx { stroke: var(--olive); }
+    .device { fill: var(--surface-soft); stroke: var(--line-strong); stroke-width: 2; }
+    .diagram-text { fill: var(--ink); font: 600 14px -apple-system, sans-serif; }
+    .diagram-small { fill: var(--muted); font: 12px ui-monospace, monospace; }
+    .pin-row { display: grid; grid-template-columns: 70px 1fr; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+    .pin-row:last-child { border-bottom: 0; }
+    .pin { color: var(--ink); font-size: 12px; font-weight: 750; }
+    .pin-panel .never { color: var(--rust); }
+
+    details { border-top: 1px solid var(--line); }
+    details:last-child { border-bottom: 1px solid var(--line); }
+    summary { padding: 17px 4px; color: var(--ink); font-weight: 700; cursor: pointer; }
+    details > div { max-width: 740px; padding: 0 4px 18px; }
+
+    .checklist { display: grid; gap: 8px; padding: 0; list-style: none; }
+    .checklist label { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; padding: 11px 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; }
+    .checklist input { width: 17px; height: 17px; margin-top: 3px; accent-color: var(--olive); }
+    .checklist input:checked + span { color: var(--muted); text-decoration: line-through; }
+
+    .sources { padding-left: 0; list-style: none; }
+    .sources li { padding: 13px 0; border-bottom: 1px solid var(--line); }
+    footer { margin-top: 40px; padding: 32px 0 58px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+
+    @media (max-width: 920px) {
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .page-grid { grid-template-columns: 1fr; }
+      .toc { display: none; }
+      .wiring { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .shell { width: min(100% - 28px, 1180px); }
+      .mini-link { display: none; }
+      .summary-grid, .card-grid { grid-template-columns: 1fr; }
+      .status-banner { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 34px 1fr; padding: 16px; }
+      h1 { font-size: 2.55rem; }
+      th, td { min-width: 150px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; }
+    }
+    @media print {
+      .topbar, .toc, .copy-button { display: none !important; }
+      body { background: #fff; color: #222; }
+      .page-grid { display: block; }
+      .card, .step, .diagram-panel, .pin-panel, .table-wrap { break-inside: avoid; box-shadow: none; }
+      a { text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to guide</a>
+  <header class="topbar">
+    <div class="brand">thekorn-os <span class="meta">/ field guide</span></div>
+    <div class="top-actions">
+      <a class="mini-link" href="plan.html">Implementation plan</a>
+      <button class="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme">◐</button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <header class="hero">
+      <p class="eyebrow">Raspberry Pi 4 · bare metal · UART-first</p>
+      <h1>Take the OS from QEMU to a real board—without guessing.</h1>
+      <p class="lede">What to buy, what the repository can produce today, how to prepare a recoverable microSD card, and how to wire a 3.3 V USB-to-TTL serial adapter safely.</p>
+
+      <div class="summary-grid" aria-label="Guide summary">
+        <article class="summary-card primary"><span class="meta">Board</span><strong>Pi 4 Model B</strong><span>BCM2711 · AArch64 · any RAM size</span></article>
+        <article class="summary-card"><span class="meta">Kernel artifact</span><strong><code>kernel8.img</code></strong><span>Linked for firmware load at <code>0x80000</code></span></article>
+        <article class="summary-card"><span class="meta">Console</span><strong>115200 8N1</strong><span>PL011 · GPIO 14/15 · no flow control</span></article>
+        <article class="summary-card"><span class="meta">Current gate</span><strong>Board port missing</strong><span>Prepare hardware now; boot after Phase 2 BSP work</span></article>
+      </div>
+    </header>
+
+    <aside class="status-banner" aria-labelledby="current-status">
+      <div class="status-mark" aria-hidden="true">!</div>
+      <div>
+        <h2 id="current-status">The generated image is not Pi-ready yet</h2>
+        <p>The build creates <code>zig-out/kernel8.img</code> at the correct Pi load address, but <code>src/main.zig</code> still imports the QEMU <code>virt</code> UART at <code>0x09000000</code>. A Pi 4 build needs a BCM2711 platform selection, GPIO 14/15 muxing, and PL011 access at <code>0xFE201000</code>. Until that exists, expect no serial output—not a usable OS.</p>
+      </div>
+    </aside>
+
+    <div class="page-grid">
+      <main id="main">
+        <section id="need">
+          <div class="section-heading"><span class="section-number">01</span><h2>Start with a small, safe hardware kit</h2></div>
+          <p class="section-intro">UART is the screen, keyboard, and crash report for this stage of the OS. HDMI, networking, USB devices, and a desktop are outside the current scope.</p>
+
+          <div class="card-grid">
+            <article class="card">
+              <span class="status ready">Required</span>
+              <h3>Raspberry Pi 4 Model B</h3>
+              <ul>
+                <li>Any RAM capacity; the board port must eventually discover RAM from the firmware DTB.</li>
+                <li>A stable USB-C supply rated for the Pi 4—use the official 5.1 V / 3 A supply or a known-good equivalent.</li>
+                <li>Cooling is optional for short boot tests, but a heat sink or ventilated case helps during long sessions.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <span class="status ready">Required</span>
+              <h3>Removable boot media</h3>
+              <ul>
+                <li>A spare microSD card; 8 GB or larger is convenient.</li>
+                <li>A microSD reader for the development machine.</li>
+                <li>Use a dedicated card: imaging or repartitioning destroys its existing contents.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <span class="status ready">Required for output</span>
+              <h3>3.3 V USB-to-TTL adapter</h3>
+              <ul>
+                <li>FTDI FT232, Silicon Labs CP2102/CP210x, or a genuine 3.3 V-compatible equivalent.</li>
+                <li>Three female-to-female Dupont leads: ground, receive, and transmit.</li>
+                <li>Verify the adapter's logic voltage from its documentation; a VCC jumper does not always change I/O levels.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <span class="status manual">Host tools</span>
+              <h3>Build, provision, observe</h3>
+              <ul>
+                <li>Nix with flakes, supplied by the project workflow.</li>
+                <li>Raspberry Pi Imager or an equivalent FAT32 provisioning tool.</li>
+                <li><code>screen</code>, <code>picocom</code>, <code>minicom</code>, PuTTY, or another serial terminal.</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="callout danger">
+            <strong>Do not power the Pi through the TTL adapter.</strong>
+            <p>Power the board through USB-C. Leave the adapter's <code>5V</code>, <code>VCC</code>, and <code>3V3</code> pins disconnected. Only GND, RXD, and TXD are used.</p>
+          </div>
+        </section>
+
+        <section id="tools">
+          <div class="section-heading"><span class="section-number">02</span><h2>Know what is automated—and what is not</h2></div>
+          <p class="section-intro">The repository pins the compiler and QEMU, but deliberately does not flash arbitrary disks. The physical deployment bundle is planned, not implemented.</p>
+
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Job</th><th>Tool or artifact</th><th>State today</th></tr></thead>
+              <tbody>
+                <tr><td>Build AArch64 kernel</td><td><code>nix develop --command zig build</code></td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Produce Pi raw image</td><td><code>zig-out/kernel8.img</code>, linked at <code>0x80000</code></td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Test portable path</td><td><code>zig build smoke-virt</code> on QEMU <code>virt</code></td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Run Pi hardware devices</td><td><code>src/platform/rpi4/</code> with GPIO and PL011</td><td><span class="status missing">Must be created</span></td></tr>
+                <tr><td>Create safe boot directory</td><td>Planned <code>zig build bundle-rpi4</code> → <code>zig-out/rpi4-boot/</code></td><td><span class="status missing">Must be created</span></td></tr>
+                <tr><td>Prepare card</td><td>Raspberry Pi Imager, Disk Utility, <code>mkfs.fat</code>, or similar</td><td><span class="status manual">Manual by design</span></td></tr>
+                <tr><td>Capture serial</td><td><code>screen</code>, <code>picocom</code>, <code>minicom</code>, or PuTTY</td><td><span class="status manual">Host-provided</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="command">
+            <span class="command-label">Build and validate the currently supported target</span>
+            <pre><code>nix develop --command zig build
+nix develop --command zig build smoke-virt
+ls -lh zig-out/kernel8.img</code></pre>
+            <button class="copy-button" type="button" aria-label="Copy build commands">Copy</button>
+          </div>
+        </section>
+
+        <section id="create">
+          <div class="section-heading"><span class="section-number">03</span><h2>Create the board port before trusting the image</h2></div>
+          <p class="section-intro">The smallest useful hardware checkpoint is boot → PL011 output → deliberate exception → resume → halt. Storage, USB, HDMI, and networking can wait.</p>
+
+          <div class="steps">
+            <article class="step">
+              <span class="step-number">1</span>
+              <div><h3>Select the platform at compile time</h3><p>Stop importing <code>platform/qemu_virt/uart.zig</code> unconditionally. Compose the same kernel console with either the QEMU or Pi backend, while keeping board addresses out of portable kernel code.</p></div>
+            </article>
+            <article class="step">
+              <span class="step-number">2</span>
+              <div><h3>Add BCM2711 GPIO and PL011 initialization</h3><p>Create the Pi 4 board support under <code>src/platform/rpi4/</code>. Route GPIO 14 and 15 to UART0, configure the BCM2711 pull controls, and initialize PL011 at <code>0xFE201000</code> for <code>115200 8N1</code>. Do not copy Pi 3 pull-register code or its <code>0x3F…</code> peripheral addresses.</p></div>
+            </article>
+            <article class="step">
+              <span class="step-number">3</span>
+              <div><h3>Preserve the firmware hand-off</h3><p>The firmware passes the merged Device Tree Blob pointer in <code>x0</code>. Keep preserving it at entry and report it over serial; later phases will parse it for RAM and reserved regions.</p></div>
+            </article>
+            <article class="step">
+              <span class="step-number">4</span>
+              <div><h3>Build a reproducible boot bundle</h3><p>Add the planned <code>bundle-rpi4</code> step only when the BSP works. It should create <code>zig-out/rpi4-boot/</code> containing a pinned firmware/DTB set, <code>config.txt</code>, <code>kernel8.img</code>, licenses, and a manifest with checksums and source revisions.</p></div>
+            </article>
+            <article class="step">
+              <span class="step-number">5</span>
+              <div><h3>Automate observation, not destructive flashing</h3><p>A future serial smoke script can wait for markers with a timeout and retain the transcript. Keep SD-card selection and copying explicit; the project plan intentionally excludes an automatic flash command for v0.</p></div>
+            </article>
+          </div>
+
+          <div class="callout safe">
+            <strong>Hardware checkpoint success:</strong>
+            <p>The UART transcript contains <code>BOOT:START</code>, the EL/MPIDR/DTB facts, the expected <code>EXCEPTION:BRK</code> report, <code>EXCEPTION:RETURNED</code>, and finally <code>BOOT:OK</code>.</p>
+          </div>
+        </section>
+
+        <section id="card">
+          <div class="section-heading"><span class="section-number">04</span><h2>Prepare a recoverable microSD card</h2></div>
+          <p class="section-intro">Use this procedure after the Pi platform backend exists. Until <code>bundle-rpi4</code> is implemented, the safest source of compatible firmware files is a freshly imaged Raspberry Pi OS card.</p>
+
+          <div class="steps">
+            <article class="step">
+              <span class="step-number">1</span>
+              <div>
+                <h3>Write Raspberry Pi OS Lite (64-bit) to a spare card</h3>
+                <p>Use Raspberry Pi Imager on macOS, Linux, or Windows. This gives the card a bootable FAT partition and a mutually compatible firmware, DTB, and overlay set. Double-check the selected device—the write erases it.</p>
+              </div>
+            </article>
+            <article class="step">
+              <span class="step-number">2</span>
+              <div>
+                <h3>Back up the visible boot partition</h3>
+                <p>After imaging, eject and reinsert the card, then copy the entire boot partition to a dated directory on the host. Keep firmware files together; do not mix <code>start4.elf</code>, <code>fixup4.dat</code>, DTBs, and overlays from unrelated releases.</p>
+              </div>
+            </article>
+            <article class="step">
+              <span class="step-number">3</span>
+              <div>
+                <h3>Install the custom kernel and minimal configuration</h3>
+                <p>Copy <code>zig-out/kernel8.img</code> to the root of the FAT boot partition, replacing the Linux file of the same name. Replace <code>config.txt</code> with the minimal configuration below. Preserve <code>start4.elf</code>, <code>fixup4.dat</code>, <code>bcm2711-rpi-4-b.dtb</code>, and the <code>overlays/</code> directory.</p>
+                <div class="command">
+                  <span class="command-label">config.txt — explicit Pi 4 bare-metal boot</span>
+                  <pre><code>[pi4]
+arm_64bit=1
+kernel=kernel8.img
+enable_uart=1
+dtoverlay=disable-bt
+
+[all]</code></pre>
+                  <button class="copy-button" type="button" aria-label="Copy config.txt">Copy</button>
+                </div>
+                <p><code>dtoverlay=disable-bt</code> makes UART0/PL011 the primary UART on the header. The bare-metal BSP must still configure the GPIO function and UART registers itself. <code>cmdline.txt</code> is a Linux kernel command line and is not needed by this kernel.</p>
+              </div>
+            </article>
+            <article class="step">
+              <span class="step-number">4</span>
+              <div><h3>Flush writes and eject cleanly</h3><p>Eject through the operating system before removing the card. Put the card in the powered-off Pi. Keep the original backup so the card can be restored without downloading firmware again.</p></div>
+            </article>
+          </div>
+
+          <details>
+            <summary>What must be at the root of the boot partition?</summary>
+            <div>
+              <p>For the recommended workflow, retain the complete boot partition produced by Raspberry Pi Imager and replace only the files named above. The Pi 4-relevant core is:</p>
+              <ul>
+                <li><code>start4.elf</code> and matching <code>fixup4.dat</code> — VideoCore firmware pair.</li>
+                <li><code>bcm2711-rpi-4-b.dtb</code> — base device tree passed to the kernel after overlays.</li>
+                <li><code>overlays/disable-bt.dtbo</code> plus overlay metadata — required by the configuration shown here.</li>
+                <li><code>config.txt</code> — firmware configuration.</li>
+                <li><code>kernel8.img</code> — thekorn-os raw AArch64 kernel image.</li>
+              </ul>
+              <p>The Pi 4's EEPROM bootloader loads <code>start4.elf</code> from a bootable FAT partition. Unlike older boards, it does not need <code>bootcode.bin</code> for ordinary SD boot.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Can I download firmware directly instead?</summary>
+            <div><p>Yes, but pin a known repository revision from <a href="https://github.com/raspberrypi/firmware/tree/master/boot">raspberrypi/firmware</a>, preserve the Broadcom and Linux license files, and record file hashes. Do not make a reproducible bundle depend on the mutable <code>master</code> branch. Raspberry Pi Imager is the lower-risk first setup because it supplies a coherent file set.</p></div>
+          </details>
+        </section>
+
+        <section id="uart">
+          <div class="section-heading"><span class="section-number">05</span><h2>Cross TX and RX; share only ground</h2></div>
+          <p class="section-intro">Wire with both devices unplugged. The pin numbers below are physical header numbers, not Broadcom GPIO numbers.</p>
+
+          <div class="wiring">
+            <figure class="diagram-panel">
+              <svg viewBox="0 0 720 360" role="img" aria-labelledby="wiring-title wiring-desc">
+                <title id="wiring-title">Raspberry Pi 4 to USB TTL UART wiring</title>
+                <desc id="wiring-desc">Pi physical pin 6 ground connects to adapter ground. Pi pin 8 transmit connects to adapter receive. Pi pin 10 receive connects to adapter transmit. Adapter power pins remain disconnected.</desc>
+                <defs>
+                  <marker id="arrow-clay" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="var(--clay)"/></marker>
+                  <marker id="arrow-olive" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="var(--olive)"/></marker>
+                </defs>
+                <rect class="device" x="35" y="35" width="275" height="285" rx="12"/>
+                <text class="diagram-text" x="172" y="70" text-anchor="middle">Raspberry Pi 4 header</text>
+                <text class="diagram-small" x="172" y="94" text-anchor="middle">USB ports at the header's pin 1 end</text>
+                <circle cx="255" cy="145" r="13" fill="var(--body)"/><text class="diagram-small" x="55" y="150">pin 6 · GND</text>
+                <circle cx="255" cy="210" r="13" fill="var(--clay)"/><text class="diagram-small" x="55" y="215">pin 8 · GPIO14 / TXD</text>
+                <circle cx="255" cy="275" r="13" fill="var(--olive)"/><text class="diagram-small" x="55" y="280">pin 10 · GPIO15 / RXD</text>
+
+                <rect class="device" x="470" y="55" width="215" height="245" rx="12"/>
+                <text class="diagram-text" x="577" y="89" text-anchor="middle">USB-to-TTL adapter</text>
+                <text class="diagram-small" x="577" y="112" text-anchor="middle">3.3 V logic selected</text>
+                <circle cx="505" cy="145" r="13" fill="var(--body)"/><text class="diagram-small" x="535" y="150">GND</text>
+                <circle cx="505" cy="210" r="13" fill="var(--clay)"/><text class="diagram-small" x="535" y="215">RXD</text>
+                <circle cx="505" cy="275" r="13" fill="var(--olive)"/><text class="diagram-small" x="535" y="280">TXD</text>
+
+                <path class="wire wire-ground" d="M268 145H492"/>
+                <path class="wire wire-tx" d="M268 210H492" marker-end="url(#arrow-clay)"/>
+                <path class="wire wire-rx" d="M492 275H268" marker-end="url(#arrow-olive)"/>
+              </svg>
+              <figcaption class="meta">Signal direction is named from each device's point of view—therefore TXD connects to RXD.</figcaption>
+            </figure>
+
+            <div class="pin-panel">
+              <h3>Three connections</h3>
+              <div class="pin-row"><span class="pin">Pi 6</span><span>GND → adapter GND</span></div>
+              <div class="pin-row"><span class="pin">Pi 8</span><span>GPIO14 / TXD → adapter RXD</span></div>
+              <div class="pin-row"><span class="pin">Pi 10</span><span>GPIO15 / RXD ← adapter TXD</span></div>
+              <h3 style="margin-top:22px">Never connect</h3>
+              <div class="pin-row"><span class="pin never">Pi 2/4</span><span>5 V power pins</span></div>
+              <div class="pin-row"><span class="pin never">Adapter</span><span>5V, VCC, or 3V3 output</span></div>
+            </div>
+          </div>
+
+          <div class="callout danger">
+            <strong>All Pi UART signals are 3.3 V.</strong>
+            <p>An RS-232 cable is not a TTL UART adapter, and a 5 V TTL signal can damage the Pi. Use a level shifter if the adapter cannot guarantee 3.3 V logic.</p>
+          </div>
+
+          <details>
+            <summary>How do I orient the 40-pin header?</summary>
+            <div><p>Use a trusted pin-out diagram or the board silkscreen rather than counting from memory. Physical pins 6, 8, and 10 are three even-numbered pins on the same row. Pin 6 is ground, pin 8 is GPIO14/TXD, and pin 10 is GPIO15/RXD. Verify with the official Raspberry Pi pin documentation before applying power.</p></div>
+          </details>
+          <details>
+            <summary>Can I connect only ground and Pi TX?</summary>
+            <div><p>Yes. The current kernel only writes output, so GND plus Pi pin 8 → adapter RXD is sufficient for receive-only observation. Adding the crossed return wire now is convenient for a future serial shell, but the OS does not currently read commands.</p></div>
+          </details>
+        </section>
+
+        <section id="terminal">
+          <div class="section-heading"><span class="section-number">06</span><h2>Open the terminal before powering the Pi</h2></div>
+          <p class="section-intro">The serial contract is <code>115200</code> baud, 8 data bits, no parity, 1 stop bit, and no hardware or software flow control.</p>
+
+          <div class="card-grid">
+            <article class="card">
+              <span class="status manual">macOS</span>
+              <h3>Use the call-out device</h3>
+              <div class="command">
+                <span class="command-label">Find and open the adapter</span>
+                <pre><code>ls /dev/cu.usb*
+screen /dev/cu.usbserial-REPLACE_ME 115200</code></pre>
+                <button class="copy-button" type="button" aria-label="Copy macOS serial commands">Copy</button>
+              </div>
+              <p>Device names may contain <code>usbserial</code> or <code>usbmodem</code>. To quit <code>screen</code>, press <code>Ctrl-A</code>, then <code>Ctrl-\</code>, and confirm.</p>
+            </article>
+            <article class="card">
+              <span class="status manual">Linux</span>
+              <h3>Use picocom or screen</h3>
+              <div class="command">
+                <span class="command-label">Typical Linux adapter path</span>
+                <pre><code>ls -l /dev/ttyUSB* /dev/ttyACM*
+picocom --baud 115200 /dev/ttyUSB0
+# or: screen /dev/ttyUSB0 115200</code></pre>
+                <button class="copy-button" type="button" aria-label="Copy Linux serial commands">Copy</button>
+              </div>
+              <p>If access is denied, add the user to the distribution's serial group (often <code>dialout</code>), log out and back in, or use an appropriate temporary permission method.</p>
+            </article>
+            <article class="card">
+              <span class="status manual">Windows</span>
+              <h3>Use PuTTY or another serial client</h3>
+              <p>Find the adapter's COM port in Device Manager. Select connection type <strong>Serial</strong>, speed <strong>115200</strong>, data bits <strong>8</strong>, parity <strong>None</strong>, stop bits <strong>1</strong>, and flow control <strong>None</strong>.</p>
+            </article>
+            <article class="card">
+              <span class="status ready">Optional preflight</span>
+              <h3>Loop back the adapter by itself</h3>
+              <p>With the adapter disconnected from the Pi, temporarily join its TXD and RXD pins. Open the terminal and type; characters should echo. Remove the loopback before wiring the Pi. This checks the adapter, driver, port name, and terminal settings—not the Pi.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="boot">
+          <div class="section-heading"><span class="section-number">07</span><h2>Use a repeatable power-cycle loop</h2></div>
+          <p class="section-intro">Bare-metal bring-up is easiest when every attempt changes one variable and preserves the transcript.</p>
+
+          <ol class="checklist" aria-label="First boot checklist">
+            <li><label><input type="checkbox" data-check="card"><span>The Pi-ready BSP is built and the card contains the new <code>kernel8.img</code>.</span></label></li>
+            <li><label><input type="checkbox" data-check="power-off"><span>Pi power and adapter USB are disconnected while checking the wiring.</span></label></li>
+            <li><label><input type="checkbox" data-check="voltage"><span>The adapter is confirmed for 3.3 V logic; its power pins are unused.</span></label></li>
+            <li><label><input type="checkbox" data-check="crossed"><span>GND is shared; Pi TX goes to adapter RX; Pi RX goes to adapter TX.</span></label></li>
+            <li><label><input type="checkbox" data-check="terminal"><span>The serial terminal is open at 115200 8N1 with flow control off.</span></label></li>
+            <li><label><input type="checkbox" data-check="boot"><span>The microSD is inserted, then the Pi is powered through USB-C.</span></label></li>
+            <li><label><input type="checkbox" data-check="capture"><span>The complete transcript is saved, including unexpected exception values.</span></label></li>
+          </ol>
+
+          <div class="command">
+            <span class="command-label">Expected Phase 2 shape — values will vary</span>
+            <pre><code>BOOT:START
+BOOT:CURRENT_EL=1
+BOOT:MPIDR=0x...
+BOOT:DTB=0x...
+BOOT:KERNEL_START=0x0000000000080000
+EXCEPTION:VECTOR=0x...
+EXCEPTION:EC=0x000000000000003c
+EXCEPTION:BRK
+EXCEPTION:RETURNED
+BOOT:OK</code></pre>
+          </div>
+
+          <p>At the current checkpoint the kernel halts in a <code>wfe</code> loop after <code>BOOT:OK</code>. There is no login prompt, shell, filesystem, networking, or shutdown command. Because the kernel does not write storage, removing USB-C power after it halts is acceptable for this bring-up stage.</p>
+        </section>
+
+        <section id="troubleshoot">
+          <div class="section-heading"><span class="section-number">08</span><h2>No output is a symptom, not a diagnosis</h2></div>
+          <p class="section-intro">Separate firmware loading, kernel execution, and UART visibility. Recheck the smallest layer first.</p>
+
+          <details open>
+            <summary>Nothing appears in the terminal</summary>
+            <div>
+              <ol>
+                <li>Confirm this is a Pi-platform build. The repository's current QEMU UART image cannot produce Pi UART output.</li>
+                <li>Check that the terminal opened the adapter that appears only when it is plugged in.</li>
+                <li>Recheck ground and the crossed TX/RX pair; try receive-only with Pi pin 8 → adapter RXD.</li>
+                <li>Confirm <code>115200 8N1</code> and disable both flow-control modes.</li>
+                <li>Restore the known-good boot partition, then verify the Pi can reach its EEPROM diagnostics without the SD card on HDMI.</li>
+                <li>Check the green activity LED pattern against the official boot diagnostics documentation.</li>
+              </ol>
+            </div>
+          </details>
+          <details>
+            <summary>Output is garbage or changes when the board gets busy</summary>
+            <div><p>The two ends disagree about baud or the wrong UART is routed. Confirm 115200 on the host and PL011—not mini UART—in the BSP/configuration. PL011 has a stable clock; mini UART baud depends on the VPU core clock unless it is fixed.</p></div>
+          </details>
+          <details>
+            <summary>The first line is missing but later output appears</summary>
+            <div><p>Open the serial terminal before applying Pi power. Also check whether the adapter resets when the board powers up; remember that the adapter and Pi are independently powered and share only signal ground.</p></div>
+          </details>
+          <details>
+            <summary>The serial port is busy</summary>
+            <div><p>A previous <code>screen</code>, <code>picocom</code>, IDE, or modem-manager process may still own it. Exit that process cleanly rather than unplugging the adapter mid-session. On Linux, a desktop modem service can probe new serial devices and should be configured to ignore the adapter if it interferes.</p></div>
+          </details>
+          <details>
+            <summary>It boots once, then behaves inconsistently</summary>
+            <div><p>Suspect power, SD-card integrity, mixed firmware files, or loose jumper wires before changing kernel code. Use an independent USB-C supply, restore the known-good boot backup, keep firmware files from one release, and save one transcript per attempt.</p></div>
+          </details>
+        </section>
+
+        <section id="sources">
+          <div class="section-heading"><span class="section-number">09</span><h2>Verify hardware details against primary sources</h2></div>
+          <p class="section-intro">This guide reflects the repository and Raspberry Pi documentation as reviewed in July 2026. Firmware behavior can evolve; pin voltage limits do not.</p>
+          <ul class="sources">
+            <li><a href="https://www.raspberrypi.com/documentation/computers/config_txt.html"><strong>Raspberry Pi <code>config.txt</code> documentation</strong></a><br>Kernel naming, <code>arm_64bit</code>, <code>enable_uart</code>, boot partition behavior.</li>
+            <li><a href="https://www.raspberrypi.com/documentation/computers/configuration.html"><strong>Raspberry Pi UART configuration</strong></a><br>PL011 versus mini UART, 3.3 V warning, primary UART mapping, GPIO 14/15, and overlays.</li>
+            <li><a href="https://www.raspberrypi.com/documentation/computers/raspberry-pi.html"><strong>Raspberry Pi hardware and boot documentation</strong></a><br>Pi 4 EEPROM boot flow, diagnostics, GPIO header, and power requirements.</li>
+            <li><a href="https://github.com/raspberrypi/firmware/tree/master/boot"><strong>Official Raspberry Pi firmware boot files</strong></a><br>Firmware, DTBs, overlays, and license files; pin a revision for reproducible bundles.</li>
+            <li><a href="https://developer.arm.com/documentation/ddi0183/latest/"><strong>Arm PrimeCell UART (PL011) Technical Reference Manual</strong></a><br>Authoritative UART register model.</li>
+            <li><a href="plan.html"><strong>thekorn-os implementation plan</strong></a><br>Phase 2 physical checkpoint and Phase 10 complete board-support scope.</li>
+          </ul>
+        </section>
+      </main>
+
+      <nav class="toc" aria-label="On this page">
+        <strong class="meta">On this page</strong>
+        <a href="#need">01 · What you need</a>
+        <a href="#tools">02 · Available tools</a>
+        <a href="#create">03 · What to create</a>
+        <a href="#card">04 · microSD setup</a>
+        <a href="#uart">05 · UART wiring</a>
+        <a href="#terminal">06 · Serial terminal</a>
+        <a href="#boot">07 · First boot</a>
+        <a href="#troubleshoot">08 · Troubleshooting</a>
+        <a href="#sources">09 · Sources</a>
+      </nav>
+    </div>
+
+    <footer>
+      <strong>thekorn-os Raspberry Pi 4 field guide</strong><br>
+      Prepare safely now; run on hardware when the Phase 2 BCM2711 UART checkpoint lands.
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var toggle = document.querySelector(".theme-toggle");
+      toggle.addEventListener("click", function () {
+        root.classList.toggle("dark");
+        localStorage.setItem("thekorn-theme", root.classList.contains("dark") ? "dark" : "light");
+      });
+
+      document.querySelectorAll(".copy-button").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var code = button.parentElement.querySelector("code").textContent;
+          var copy = navigator.clipboard && navigator.clipboard.writeText
+            ? navigator.clipboard.writeText(code)
+            : new Promise(function (resolve, reject) {
+                var area = document.createElement("textarea");
+                area.value = code;
+                area.setAttribute("readonly", "");
+                area.style.position = "fixed";
+                area.style.opacity = "0";
+                document.body.appendChild(area);
+                area.select();
+                try { document.execCommand("copy") ? resolve() : reject(); }
+                catch (error) { reject(error); }
+                area.remove();
+              });
+          copy.then(function () {
+            var old = button.textContent;
+            button.textContent = "Copied";
+            window.setTimeout(function () { button.textContent = old; }, 1400);
+          });
+        });
+      });
+
+      document.querySelectorAll("[data-check]").forEach(function (box) {
+        var key = "thekorn-rpi4-check-" + box.dataset.check;
+        box.checked = localStorage.getItem(key) === "1";
+        box.addEventListener("change", function () {
+          localStorage.setItem(key, box.checked ? "1" : "0");
+        });
+      });
+
+      var links = Array.from(document.querySelectorAll(".toc a"));
+      var sections = links.map(function (link) { return document.querySelector(link.getAttribute("href")); });
+      if ("IntersectionObserver" in window) {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) return;
+            links.forEach(function (link) { link.classList.remove("active"); });
+            var active = links[sections.indexOf(entry.target)];
+            if (active) active.classList.add("active");
+          });
+        }, { rootMargin: "-20% 0px -68%", threshold: 0 });
+        sections.forEach(function (section) { if (section) observer.observe(section); });
+      }
+    }());
+  </script>
+</body>
+</html>
