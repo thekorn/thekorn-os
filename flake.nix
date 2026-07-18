@@ -34,6 +34,7 @@
           pkgs.codebook
           pkgs.coreutils
           pkgs.jq
+          pkgs.minicom
           pkgs.mtools
           pkgs.python3
           pkgs.qemu

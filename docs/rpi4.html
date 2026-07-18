@@ -287,6 +287,59 @@
     .pin { color: var(--ink); font-size: 12px; font-weight: 750; }
     .pin-panel .never { color: var(--rust); }
 
+    .pinout-figure { margin: 0 0 20px; }
+    .pinout-board {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .pinout-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .pinout-heading h3 { margin-bottom: 4px; }
+    .pinout-heading p { margin: 0; color: var(--muted); font-size: 13px; }
+    .pin-one-marker { flex: 0 0 auto; color: var(--clay); font: 750 11px/1.4 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .06em; }
+    .pinout-grid {
+      display: grid;
+      grid-template-columns: minmax(145px, 1fr) 44px 44px minmax(145px, 1fr);
+      gap: 7px 8px;
+      align-items: center;
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-soft);
+    }
+    .pin-label { color: var(--muted); font: 11px/1.25 ui-monospace, monospace; }
+    .pin-label.odd { text-align: right; }
+    .pin-label.even { text-align: left; }
+    .header-pin {
+      display: grid;
+      width: 36px;
+      height: 28px;
+      place-items: center;
+      border: 2px solid var(--line-strong);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--ink);
+      font: 750 11px/1 ui-monospace, monospace;
+    }
+    .header-pin.power { border-color: var(--rust); color: var(--rust); }
+    .header-pin.ground { border-color: var(--body); background: var(--body); color: var(--surface); }
+    .header-pin.tx { border-color: var(--clay); background: var(--clay); color: #fff; box-shadow: 0 0 0 3px var(--clay-soft); }
+    .header-pin.rx { border-color: var(--olive); background: var(--olive); color: #fff; box-shadow: 0 0 0 3px var(--olive-soft); }
+    .pin-label.tx { color: var(--clay); font-weight: 750; }
+    .pin-label.rx { color: var(--olive); font-weight: 750; }
+    .pin-label.ground { color: var(--ink); font-weight: 750; }
+    .pinout-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 15px; color: var(--muted); font-size: 12px; }
+    .legend-key { display: inline-flex; align-items: center; gap: 7px; }
+    .legend-dot { width: 10px; height: 10px; border: 2px solid var(--line-strong); border-radius: 3px; background: var(--surface); }
+    .legend-dot.power { border-color: var(--rust); }
+    .legend-dot.ground { border-color: var(--body); background: var(--body); }
+    .legend-dot.tx { border-color: var(--clay); background: var(--clay); }
+    .legend-dot.rx { border-color: var(--olive); background: var(--olive); }
+    .pinout-figure figcaption { margin-top: 10px; color: var(--muted); font-size: 12px; }
+
     details { border-top: 1px solid var(--line); }
     details:last-child { border-bottom: 1px solid var(--line); }
     summary { padding: 17px 4px; color: var(--ink); font-weight: 700; cursor: pointer; }
@@ -313,6 +366,12 @@
       .summary-grid, .card-grid { grid-template-columns: 1fr; }
       .status-banner { grid-template-columns: 1fr; }
       .step { grid-template-columns: 34px 1fr; padding: 16px; }
+      .pinout-board { padding: 15px; }
+      .pinout-heading { display: block; }
+      .pin-one-marker { margin-top: 8px; }
+      .pinout-grid { grid-template-columns: minmax(0, 1fr) 34px 34px minmax(0, 1fr); gap: 6px 4px; padding: 10px 6px; }
+      .header-pin { width: 30px; height: 25px; font-size: 10px; }
+      .pin-label { overflow-wrap: anywhere; font-size: 9px; }
       h1 { font-size: 2.55rem; }
       th, td { min-width: 150px; }
     }
@@ -324,7 +383,7 @@
       .topbar, .toc, .copy-button { display: none !important; }
       body { background: #fff; color: #222; }
       .page-grid { display: block; }
-      .card, .step, .diagram-panel, .pin-panel, .table-wrap { break-inside: avoid; box-shadow: none; }
+      .card, .step, .diagram-panel, .pin-panel, .pinout-board, .table-wrap { break-inside: avoid; box-shadow: none; }
       a { text-decoration: none; }
     }
   </style>
@@ -401,7 +460,7 @@
               <ul>
                 <li>Nix with flakes, supplied by the project workflow.</li>
                 <li>Raspberry Pi Imager or an equivalent FAT32 provisioning tool.</li>
-                <li><code>screen</code>, <code>picocom</code>, <code>minicom</code>, PuTTY, or another serial terminal.</li>
+                <li><code>minicom</code> on macOS/Linux or PuTTY on Windows.</li>
               </ul>
             </article>
           </div>
@@ -426,7 +485,7 @@
                 <tr><td>Test portable path</td><td><code>zig build smoke-virt</code> on QEMU <code>virt</code></td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Run Pi hardware devices</td><td><code>src/platform/rpi4/</code> with GPIO and PL011</td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Prepare card</td><td>Raspberry Pi Imager or equivalent image writer</td><td><span class="status manual">Manual by design</span></td></tr>
-                <tr><td>Capture serial</td><td><code>screen</code>, <code>picocom</code>, <code>minicom</code>, or PuTTY</td><td><span class="status manual">Host-provided</span></td></tr>
+                <tr><td>Capture serial</td><td><code>minicom</code> or PuTTY</td><td><span class="status manual">Host-provided</span></td></tr>
               </tbody>
             </table>
           </div>
@@ -540,6 +599,48 @@ device_tree=
           <div class="section-heading"><span class="section-number">05</span><h2>Cross TX and RX; share only ground</h2></div>
           <p class="section-intro">Wire with both devices unplugged. The pin numbers below are physical header numbers, not Broadcom GPIO numbers.</p>
 
+          <figure class="pinout-figure" aria-labelledby="pinout-title">
+            <div class="pinout-board">
+              <div class="pinout-heading">
+                <div>
+                  <h3 id="pinout-title">Raspberry Pi 4 · 40-pin GPIO header</h3>
+                  <p>Top view of the board header. UART uses the highlighted even-numbered row.</p>
+                </div>
+                <span class="pin-one-marker">Pin 1 · square pad end</span>
+              </div>
+              <div class="pinout-grid" role="img" aria-label="Raspberry Pi 4 forty-pin GPIO header. Physical pin 6 is ground, pin 8 is GPIO 14 transmit, and pin 10 is GPIO 15 receive.">
+                <span class="pin-label odd">3V3 power</span><span class="header-pin power">1</span><span class="header-pin power">2</span><span class="pin-label even">5V power</span>
+                <span class="pin-label odd">GPIO2 · SDA1</span><span class="header-pin">3</span><span class="header-pin power">4</span><span class="pin-label even">5V power</span>
+                <span class="pin-label odd">GPIO3 · SCL1</span><span class="header-pin">5</span><span class="header-pin ground">6</span><span class="pin-label even ground">GND · connect</span>
+                <span class="pin-label odd">GPIO4</span><span class="header-pin">7</span><span class="header-pin tx">8</span><span class="pin-label even tx">GPIO14 · TXD → adapter RXD</span>
+                <span class="pin-label odd">GND</span><span class="header-pin ground">9</span><span class="header-pin rx">10</span><span class="pin-label even rx">GPIO15 · RXD ← adapter TXD</span>
+                <span class="pin-label odd">GPIO17</span><span class="header-pin">11</span><span class="header-pin">12</span><span class="pin-label even">GPIO18 · PWM0</span>
+                <span class="pin-label odd">GPIO27</span><span class="header-pin">13</span><span class="header-pin ground">14</span><span class="pin-label even">GND</span>
+                <span class="pin-label odd">GPIO22</span><span class="header-pin">15</span><span class="header-pin">16</span><span class="pin-label even">GPIO23</span>
+                <span class="pin-label odd">3V3 power</span><span class="header-pin power">17</span><span class="header-pin">18</span><span class="pin-label even">GPIO24</span>
+                <span class="pin-label odd">GPIO10 · MOSI</span><span class="header-pin">19</span><span class="header-pin ground">20</span><span class="pin-label even">GND</span>
+                <span class="pin-label odd">GPIO9 · MISO</span><span class="header-pin">21</span><span class="header-pin">22</span><span class="pin-label even">GPIO25</span>
+                <span class="pin-label odd">GPIO11 · SCLK</span><span class="header-pin">23</span><span class="header-pin">24</span><span class="pin-label even">GPIO8 · CE0</span>
+                <span class="pin-label odd">GND</span><span class="header-pin ground">25</span><span class="header-pin">26</span><span class="pin-label even">GPIO7 · CE1</span>
+                <span class="pin-label odd">GPIO0 · ID_SD</span><span class="header-pin">27</span><span class="header-pin">28</span><span class="pin-label even">GPIO1 · ID_SC</span>
+                <span class="pin-label odd">GPIO5</span><span class="header-pin">29</span><span class="header-pin ground">30</span><span class="pin-label even">GND</span>
+                <span class="pin-label odd">GPIO6</span><span class="header-pin">31</span><span class="header-pin">32</span><span class="pin-label even">GPIO12 · PWM0</span>
+                <span class="pin-label odd">GPIO13 · PWM1</span><span class="header-pin">33</span><span class="header-pin ground">34</span><span class="pin-label even">GND</span>
+                <span class="pin-label odd">GPIO19 · PCM_FS</span><span class="header-pin">35</span><span class="header-pin">36</span><span class="pin-label even">GPIO16</span>
+                <span class="pin-label odd">GPIO26</span><span class="header-pin">37</span><span class="header-pin">38</span><span class="pin-label even">GPIO20 · PCM_DIN</span>
+                <span class="pin-label odd">GND</span><span class="header-pin ground">39</span><span class="header-pin">40</span><span class="pin-label even">GPIO21 · PCM_DOUT</span>
+              </div>
+              <div class="pinout-legend" aria-label="Pinout color legend">
+                <span class="legend-key"><i class="legend-dot tx"></i>UART transmit</span>
+                <span class="legend-key"><i class="legend-dot rx"></i>UART receive</span>
+                <span class="legend-key"><i class="legend-dot ground"></i>Ground</span>
+                <span class="legend-key"><i class="legend-dot power"></i>Power—do not connect</span>
+                <span class="legend-key"><i class="legend-dot"></i>Other GPIO</span>
+              </div>
+            </div>
+            <figcaption>Physical numbering is shown inside each pin. Confirm the square pin-1 pad on your board before counting down the header.</figcaption>
+          </figure>
+
           <div class="wiring">
             <figure class="diagram-panel">
               <svg viewBox="0 0 720 360" role="img" aria-labelledby="wiring-title wiring-desc">
@@ -603,26 +704,25 @@ device_tree=
           <div class="card-grid">
             <article class="card">
               <span class="status manual">macOS</span>
-              <h3>Use the call-out device</h3>
+              <h3>Open the call-out device with Minicom</h3>
               <div class="command">
                 <span class="command-label">Find and open the adapter</span>
                 <pre><code>ls /dev/cu.usb*
-screen /dev/cu.usbserial-REPLACE_ME 115200</code></pre>
+minicom -D /dev/cu.usbserial-REPLACE_ME -b 115200 -8</code></pre>
                 <button class="copy-button" type="button" aria-label="Copy macOS serial commands">Copy</button>
               </div>
-              <p>Device names may contain <code>usbserial</code> or <code>usbmodem</code>. To quit <code>screen</code>, press <code>Ctrl-A</code>, then <code>Ctrl-\</code>, and confirm.</p>
+              <p>Device names may contain <code>usbserial</code> or <code>usbmodem</code>. On the first run, press <code>Ctrl-A O</code>, open <strong>Serial port setup</strong>, and set both hardware and software flow control to <strong>No</strong>. Press <code>Ctrl-A X</code> to exit Minicom.</p>
             </article>
             <article class="card">
               <span class="status manual">Linux</span>
-              <h3>Use picocom or screen</h3>
+              <h3>Open the adapter with Minicom</h3>
               <div class="command">
                 <span class="command-label">Typical Linux adapter path</span>
                 <pre><code>ls -l /dev/ttyUSB* /dev/ttyACM*
-picocom --baud 115200 /dev/ttyUSB0
-# or: screen /dev/ttyUSB0 115200</code></pre>
+minicom -D /dev/ttyUSB0 -b 115200 -8</code></pre>
                 <button class="copy-button" type="button" aria-label="Copy Linux serial commands">Copy</button>
               </div>
-              <p>If access is denied, add the user to the distribution's serial group (often <code>dialout</code>), log out and back in, or use an appropriate temporary permission method.</p>
+              <p>Use <code>Ctrl-A O</code> → <strong>Serial port setup</strong> to disable hardware and software flow control, and <code>Ctrl-A X</code> to exit. If access is denied, add the user to the distribution's serial group (often <code>dialout</code>), then log out and back in. Avoid running Minicom as root by habit.</p>
             </article>
             <article class="card">
               <span class="status manual">Windows</span>
@@ -695,7 +795,7 @@ BOOT:OK</code></pre>
           </details>
           <details>
             <summary>The serial port is busy</summary>
-            <div><p>A previous <code>screen</code>, <code>picocom</code>, IDE, or modem-manager process may still own it. Exit that process cleanly rather than unplugging the adapter mid-session. On Linux, a desktop modem service can probe new serial devices and should be configured to ignore the adapter if it interferes.</p></div>
+            <div><p>A previous <code>minicom</code>, IDE, or modem-manager process may still own it. Exit that process cleanly rather than unplugging the adapter mid-session. On Linux, a desktop modem service can probe new serial devices and should be configured to ignore the adapter if it interferes.</p></div>
           </details>
           <details>
             <summary>It boots once, then behaves inconsistently</summary>
