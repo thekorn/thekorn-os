@@ -17,7 +17,11 @@ pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c)
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_start),
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_end),
     );
-    asm volatile ("brk #0");
+    if (builtin.cpu.arch == .aarch64) {
+        asm volatile ("brk #0");
+    } else {
+        @trap();
+    }
     KernelConsole.write("EXCEPTION:RETURNED\n");
     KernelConsole.write("BOOT:OK\n");
     halt();
@@ -48,6 +52,7 @@ pub fn panic(message: []const u8, _: ?*std.lang.StackTrace, return_address: ?usi
 }
 
 fn halt() noreturn {
+    if (builtin.cpu.arch != .aarch64) @trap();
     while (true) asm volatile ("wfe");
 }
 
