@@ -261,7 +261,7 @@
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
             <span class="meta">Status: implementation in progress · phases 0–1 complete</span>
-            <span class="meta">Updated: 2026-07-17</span>
+            <span class="meta">Updated: 2026-07-18</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
         </div>
@@ -277,7 +277,7 @@
     </header>
 
     <nav class="mobile-nav" aria-label="Plan sections">
-      <a href="#scope">Scope</a><a href="#strategy">Strategy</a><a href="#architecture">Architecture</a><a href="#milestones">Milestones</a><a href="#structure">Structure</a><a href="#verification">Verification</a><a href="#risks">Risks</a><a href="#decisions">Decisions</a>
+      <a href="#scope">Scope</a><a href="#strategy">Strategy</a><a href="#architecture">Architecture</a><a href="#milestones">Milestones</a><a href="#structure">Structure</a><a href="#verification">Verification</a><a href="#risks">Risks</a><a href="#decisions">Decisions</a><a href="#ideas">Ideas</a>
     </nav>
 
     <div class="layout">
@@ -513,8 +513,23 @@ nix develop --command zig build bundle-rpi4</code></pre>
           </div>
         </section>
 
+        <section id="ideas">
+          <div class="section-heading"><span class="section-number">10</span><h2>Ideas</h2></div>
+          <p class="section-intro">Useful tooling improvements to evaluate without expanding the v0 kernel scope.</p>
+          <div class="split">
+            <article class="card">
+              <h3>Spell checking with Codebook</h3>
+              <p>Integrate <a href="https://github.com/blopker/codebook">Codebook</a> to catch spelling mistakes in source code, comments, and documentation.</p>
+            </article>
+            <article class="card">
+              <h3>Code coverage with kcov</h3>
+              <p>Add coverage reporting for host-native Zig tests using <a href="https://github.com/SimonKagstrom/kcov">kcov</a>, following the build integration used by <a href="https://github.com/thekorn/zig-amongc/blob/main/build.zig"><code>zig-amongc</code></a>.</p>
+            </article>
+          </div>
+        </section>
+
         <section id="references">
-          <div class="section-heading"><span class="section-number">10</span><h2>Use the references for concepts, then verify Pi 4 specifics</h2></div>
+          <div class="section-heading"><span class="section-number">11</span><h2>Use the references for concepts, then verify Pi 4 specifics</h2></div>
           <p class="section-intro">The two tutorial repositories primarily teach Raspberry Pi 3-era hardware. Their progression remains valuable; their constants are not authoritative for BCM2711.</p>
           <ul class="sources">
             <li><a href="https://github.com/bztsrc/raspi3-tutorial">bztsrc/raspi3-tutorial</a> — compact examples for boot, UART, exception levels, MMU, SD, and FAT.</li>
@@ -537,7 +552,8 @@ nix develop --command zig build bundle-rpi4</code></pre>
         <a href="#risks">07 · Risks</a>
         <a href="#decisions">08 · Decisions</a>
         <a href="#done">09 · Definition of done</a>
-        <a href="#references">10 · References</a>
+        <a href="#ideas">10 · Ideas</a>
+        <a href="#references">11 · References</a>
       </aside>
     </div>
 
