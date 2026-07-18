@@ -1,4 +1,4 @@
-//! Minimal driver for UART0 on QEMU's Arm `virt` machine.
+//! Minimal driver for UART0 on the QEMU Arm `virt` machine.
 //!
 //! QEMU maps UART0 as an Arm PrimeCell PL011 device in the guest's physical
 //! address space. QEMU chooses the `0x0900_0000` base address; the PL011
