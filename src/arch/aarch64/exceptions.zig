@@ -18,6 +18,15 @@ test "exception class is decoded from ESR bits 31 through 26" {
     try std.testing.expectEqual(breakpoint_class, class(breakpoint_class << 26));
 }
 
+test "exception class ignores bits outside the class field" {
+    try std.testing.expectEqual(0, class(0));
+    try std.testing.expectEqual(@as(u64, 0x3f), class(~@as(u64, 0)));
+    try std.testing.expectEqual(
+        breakpoint_class,
+        class((breakpoint_class << 26) | 0x03ff_ffff | (@as(u64, 0xffff_ffff) << 32)),
+    );
+}
+
 test "exception frame layout matches the vector assembly" {
     try std.testing.expectEqual(280, @sizeOf(Frame));
     try std.testing.expectEqual(248, @offsetOf(Frame, "elr"));

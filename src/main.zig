@@ -133,6 +133,36 @@ test "panic output uses the serial CRLF convention" {
     );
 }
 
+test "console translates every newline to CRLF" {
+    resetTestOutput();
+
+    Console(captureTestByte).write("first\n\nlast\n");
+
+    try std.testing.expectEqualStrings(
+        "first\r\n\r\nlast\r\n",
+        test_output[0..test_output_len],
+    );
+}
+
+test "console writes hexadecimal boundary values with full width" {
+    resetTestOutput();
+
+    Console(captureTestByte).writeHex("ZERO=", 0);
+    try std.testing.expectEqualStrings(
+        "ZERO=0x0000000000000000\r\n",
+        test_output[0..test_output_len],
+    );
+
+    resetTestOutput();
+    Console(captureTestByte).writeHex("MAX=", std.math.maxInt(usize));
+    try std.testing.expectEqual("MAX=0x".len + @bitSizeOf(usize) / 4 + 2, test_output_len);
+    try std.testing.expect(std.mem.startsWith(u8, test_output[0..test_output_len], "MAX=0x"));
+    for (test_output["MAX=0x".len .. test_output_len - 2]) |digit| {
+        try std.testing.expectEqual('f', digit);
+    }
+    try std.testing.expectEqualStrings("\r\n", test_output[test_output_len - 2 .. test_output_len]);
+}
+
 test "boot facts include padded hexadecimal addresses and completion markers" {
     resetTestOutput();
 
@@ -160,4 +190,17 @@ test "GIC acknowledgement decoding excludes CPU ID bits" {
         @as(u32, 30),
         uart.gic.interruptId((5 << 10) | 30),
     );
+}
+
+test "GIC acknowledgement decoding preserves interrupt ID boundaries" {
+    try std.testing.expectEqual(@as(u32, 0), uart.gic.interruptId(0));
+    try std.testing.expectEqual(
+        uart.gic.first_special_interrupt - 1,
+        uart.gic.interruptId(uart.gic.first_special_interrupt - 1),
+    );
+    try std.testing.expectEqual(
+        uart.gic.first_special_interrupt,
+        uart.gic.interruptId(uart.gic.first_special_interrupt),
+    );
+    try std.testing.expectEqual(@as(u32, 0x3ff), uart.gic.interruptId(std.math.maxInt(u32)));
 }
