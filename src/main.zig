@@ -3,14 +3,14 @@ const builtin = @import("builtin");
 const uart = @import("platform/qemu_virt/uart.zig");
 const exceptions = @import("arch/aarch64/exceptions.zig");
 const Console = @import("kernel/console.zig").Console;
-const console = Console(uart.writeByte);
+const KernelConsole = Console(uart.writeByte);
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
 
 pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c) noreturn {
     uart.init();
-    console.writeBootFacts(
+    KernelConsole.writeBootFacts(
         dtb,
         entry_el,
         mpidr,
@@ -18,32 +18,32 @@ pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c)
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_end),
     );
     asm volatile ("brk #0");
-    console.write("EXCEPTION:RETURNED\n");
-    console.write("BOOT:OK\n");
+    KernelConsole.write("EXCEPTION:RETURNED\n");
+    KernelConsole.write("BOOT:OK\n");
     halt();
 }
 
 pub export fn exceptionHandler(vector: usize, frame: *exceptions.Frame) callconv(.c) void {
-    console.writeHex("EXCEPTION:VECTOR=", vector);
-    console.writeHex("EXCEPTION:ESR=", frame.esr);
-    console.writeHex("EXCEPTION:EC=", exceptions.class(frame.esr));
-    console.writeHex("EXCEPTION:ELR=", frame.elr);
-    console.writeHex("EXCEPTION:SPSR=", frame.spsr);
-    console.writeHex("EXCEPTION:FAR=", frame.far);
+    KernelConsole.writeHex("EXCEPTION:VECTOR=", vector);
+    KernelConsole.writeHex("EXCEPTION:ESR=", frame.esr);
+    KernelConsole.writeHex("EXCEPTION:EC=", exceptions.class(frame.esr));
+    KernelConsole.writeHex("EXCEPTION:ELR=", frame.elr);
+    KernelConsole.writeHex("EXCEPTION:SPSR=", frame.spsr);
+    KernelConsole.writeHex("EXCEPTION:FAR=", frame.far);
 
     if (vector == 4 and exceptions.class(frame.esr) == exceptions.breakpoint_class) {
-        console.write("EXCEPTION:BRK\n");
+        KernelConsole.write("EXCEPTION:BRK\n");
         frame.elr += 4;
         return;
     }
 
-    console.write("EXCEPTION:UNHANDLED\n");
+    KernelConsole.write("EXCEPTION:UNHANDLED\n");
     halt();
 }
 
-pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
+pub fn panic(message: []const u8, _: ?*std.lang.StackTrace, return_address: ?usize) noreturn {
     if (builtin.is_test) std.debug.defaultPanic(message, return_address);
-    console.writePanic(message);
+    KernelConsole.writePanic(message);
     halt();
 }
 

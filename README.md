@@ -40,6 +40,12 @@ nix develop --command zig build -Doptimize=ReleaseSmall
 
 ## Run and verify
 
+Lint the Zig source:
+
+```sh
+nix develop --command zig build lint
+```
+
 Run the kernel interactively on QEMU `virt`:
 
 ```sh

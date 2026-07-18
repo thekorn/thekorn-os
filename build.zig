@@ -1,4 +1,5 @@
 const std = @import("std");
+const zlinter = @import("zlinter");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.option(
@@ -43,12 +44,29 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
         .test_runner = .{
-            .path = b.path("test_runner.zig"),
+            .path = b.path("src/test_runner.zig"),
             .mode = .simple,
         },
     });
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&b.addRunArtifact(native_tests).step);
+
+    const lint_step = b.step("lint", "Lint source code");
+    lint_step.dependOn(step: {
+        var builder = zlinter.builder(b, .{});
+        builder.addPaths(.{
+            .include_dirs = &.{b.path("src")},
+        });
+        builder.addRule(.{ .builtin = .field_naming }, .{});
+        builder.addRule(.{ .builtin = .declaration_naming }, .{});
+        builder.addRule(.{ .builtin = .function_naming }, .{});
+        builder.addRule(.{ .builtin = .file_naming }, .{});
+        builder.addRule(.{ .builtin = .switch_case_ordering }, .{});
+        builder.addRule(.{ .builtin = .no_unused }, .{});
+        builder.addRule(.{ .builtin = .no_deprecated }, .{});
+        builder.addRule(.{ .builtin = .no_orelse_unreachable }, .{});
+        break :step builder.build();
+    });
 }
 
 fn addKernel(

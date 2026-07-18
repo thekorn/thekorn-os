@@ -12,6 +12,7 @@ words = [
     "FDT",
     "FIF",
     "FIQ",
+    "FQDT",
     "GIC",
     "HCE",
     "HCR",
@@ -97,6 +98,7 @@ words = [
     "xffffff",
     "xzr",
     "zigpkgs",
+    "zlinter",
     "zls",
     "zon",
 ]
