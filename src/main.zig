@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const uart = @import("platform");
 const exceptions = @import("arch/aarch64/exceptions.zig");
+const mmu = @import("arch/aarch64/mmu.zig");
 const timer = @import("arch/aarch64/timer.zig");
 const fdt = @import("formats/fdt.zig");
 const physical_memory = @import("kernel/physical_memory.zig");
@@ -158,6 +159,10 @@ fn captureTestByte(byte: u8) void {
 
 fn resetTestOutput() void {
     test_output_len = 0;
+}
+
+test {
+    _ = mmu;
 }
 
 test "panic output uses the serial CRLF convention" {

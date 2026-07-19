@@ -13,6 +13,8 @@ kernel also handles generic physical timer interrupts through a GICv2. See [the
 implementation plan](docs/plan.html) for the roadmap and current phase status.
 Both targets consume the firmware-provided device tree to discover RAM and
 reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
+Phase 5 groundwork page-aligns the kernel's permission regions and provides
+host-tested AArch64 translation-descriptor encoding; the MMU remains disabled.
 
 ## Requirements
 
@@ -137,3 +139,6 @@ and Zig source locations.
   monotonic tick accounting, and the 1,000-tick smoke-test gate
 - Phase 4: complete — DTB RAM/reservation discovery, 4 KiB bitmap frame
   allocation, host tests, and the QEMU allocation-sweep gate
+- Phase 5: in progress — page-granular linker boundaries and host-tested
+  translation descriptors are implemented; identity-map construction and MMU
+  activation remain

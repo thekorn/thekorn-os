@@ -260,8 +260,8 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: Phase 4 complete · Phase 2 awaits hardware verification</span>
-            <span class="meta">Updated: 2026-07-18</span>
+            <span class="meta">Status: Phase 5 in progress · Phase 2 awaits hardware verification</span>
+            <span class="meta">Updated: 2026-07-19</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
         </div>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0, 1, 3, and 4 are complete, and the Phase 2 software gate is implemented. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. QEMU verifies DTB-based memory discovery and frame allocation, the EL1 exception path, and 1,000 generic physical timer interrupts through its GICv2; the Pi exception path still requires physical-board verification.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0, 1, 3, and 4 are complete, Phase 5 is in progress, and the Phase 2 software gate is implemented. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. QEMU verifies DTB-based memory discovery and frame allocation, the EL1 exception path, and 1,000 generic physical timer interrupts through its GICv2; the Pi exception path still requires physical-board verification. Phase 5 now provides page-granular kernel permission boundaries and host-tested AArch64 translation descriptors, but does not yet install translation tables or enable the MMU.</p>
         </section>
 
         <section id="strategy">
@@ -389,7 +389,7 @@
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 5</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><h3>Identity map, then a protected high-half kernel</h3><p>Build 4 KiB translation tables with normal-memory and device attributes. First enable a minimal identity map and verify text RX, rodata R/NX, data/stacks/heap RW/NX, and MMIO device RW/NX. In a separate step, map the kernel through <code>TTBR1_EL1</code> and branch high. Use barriers around MAIR, TCR, TTBR, TLB, and SCTLR changes.</p><div class="tags"><span class="tag">identity map</span><span class="tag">TTBR1</span><span class="tag">high half</span><span class="tag">W^X</span></div><div class="exit"><strong>Exit:</strong> console and timer survive both transitions; writes to text and unmapped addresses fault predictably. The high-half transition is complete before EL0 work starts.</div></div>
+              <div class="milestone-body"><span class="status recommended">In progress · descriptor groundwork</span><h3>Identity map, then a protected high-half kernel</h3><p>Build 4 KiB translation tables with normal-memory and device attributes. First enable a minimal identity map and verify text RX, rodata R/NX, data/stacks/heap RW/NX, and MMIO device RW/NX. In a separate step, map the kernel through <code>TTBR1_EL1</code> and branch high. Use barriers around MAIR, TCR, TTBR, TLB, and SCTLR changes.</p><div class="tags"><span class="tag">identity map</span><span class="tag">TTBR1</span><span class="tag">high half</span><span class="tag">W^X</span></div><div class="exit"><strong>Exit:</strong> console and timer survive both transitions; writes to text and unmapped addresses fault predictably. The high-half transition is complete before EL0 work starts.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 6</div><div class="rail"><span class="dot"></span></div>

@@ -165,12 +165,16 @@ fn addKernel(
             .target = target,
             .optimize = optimize,
             .strip = false,
+            .unwind_tables = .none,
+            .pic = false,
             .imports = &.{.{
                 .name = "platform",
                 .module = b.createModule(.{
                     .root_source_file = platform,
                     .target = target,
                     .optimize = optimize,
+                    .unwind_tables = .none,
+                    .pic = false,
                 }),
             }},
         }),
