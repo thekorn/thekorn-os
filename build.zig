@@ -182,6 +182,7 @@ fn addKernel(
     kernel.entry = .{ .symbol_name = "_start" };
     kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/boot.S"));
     kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/vectors.S"));
+    kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/user_fixture.S"));
     return kernel;
 }
 

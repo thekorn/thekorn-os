@@ -15,6 +15,20 @@ SECTIONS
         __text_end = .;
     }
 
+    .user_text : ALIGN(4096) {
+        __user_text_start = .;
+        KEEP(*(.user.text))
+        . = ALIGN(4096);
+        __user_text_end = .;
+    }
+
+    .user_rodata : ALIGN(4096) {
+        __user_rodata_start = .;
+        KEEP(*(.user.rodata))
+        . = ALIGN(4096);
+        __user_rodata_end = .;
+    }
+
     .rodata : ALIGN(4096) {
         __rodata_start = .;
         *(.rodata .rodata.*)
@@ -30,8 +44,15 @@ SECTIONS
         __data_end = .;
     }
 
-    .bss (NOLOAD) : ALIGN(4096) {
+    .user_bss (NOLOAD) : ALIGN(4096) {
         __bss_start = .;
+        __user_bss_start = .;
+        *(.user.bss)
+        . = ALIGN(4096);
+        __user_bss_end = .;
+    }
+
+    .bss (NOLOAD) : ALIGN(4096) {
         *(.bss .bss.*)
         *(COMMON)
         . = ALIGN(4096);

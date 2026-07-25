@@ -7,18 +7,33 @@ const timer = @import("arch/aarch64/timer.zig");
 const fdt = @import("formats/fdt.zig");
 const physical_memory = @import("kernel/physical_memory.zig");
 const scheduler = @import("kernel/scheduler.zig");
+const syscall = @import("kernel/syscall.zig");
 const Console = @import("kernel/console.zig").Console;
 const KernelConsole = Console(uart.writeByte);
 
 const timer_tick_limit = 1_000;
 const cooperative_progress_limit = 32;
 const preemptive_progress_limit = 10_000;
+const user_tick_target = 100;
+const user_task_id = 2;
 const cooperative_phase: u8 = 0;
 const preemptive_phase: u8 = 1;
+const user_text_address: u64 = 0x0040_0000;
+const user_rodata_address: u64 = 0x0041_0000;
+const user_data_address: u64 = 0x0042_0000;
+const user_heap_address: u64 = 0x0043_0000;
+const user_stack_address: u64 = 0x0050_0000;
+const user_data_pages = 1;
+const user_stack_pages = 4;
+const user_heap_pages = 4;
+const max_user_write = 256;
 // EL1h with debug, SError, and FIQ masked. IRQ remains enabled.
 const scheduler_initial_spsr: u64 = 0x345;
+// EL0t with debug, SError, IRQ, and FIQ enabled.
+const user_initial_spsr: u64 = 0;
 const max_dtb_size = 2 * 1024 * 1024;
 const instruction_abort_current_el = 0x21;
+const data_abort_lower_el = 0x24;
 const data_abort_current_el = 0x25;
 const write_not_read: u64 = 1 << 6;
 const fault_status_mask = 0x3f;
@@ -35,6 +50,18 @@ const MmuProbe = enum {
     unmapped_write,
 };
 
+const UserFaultProbe = enum {
+    none,
+    uart,
+    kernel,
+};
+
+const UserMemory = extern struct {
+    data: [user_data_pages * mmu.page_size]u8,
+    stack: [user_stack_pages * mmu.page_size]u8,
+    heap: [user_heap_pages * mmu.page_size]u8,
+};
+
 var unexpected_interrupts: usize = 0;
 var frame_bitmap: [256 * 1024]u8 = undefined;
 var identity_map: mmu.IdentityMap = .{};
@@ -48,6 +75,13 @@ var scheduling_enabled = false;
 var scheduling_phase: u8 = cooperative_phase;
 var cooperative_progress: [scheduler.task_count]usize = @splat(0);
 var preemptive_progress: [scheduler.task_count]usize = @splat(0);
+var user_memory: UserMemory align(mmu.page_size) linksection(if (builtin.target.ofmt == .macho) "__DATA,__user_bss" else ".user.bss") = undefined;
+var user_started = false;
+var user_exited = false;
+var user_exit_status: u64 = 0;
+var user_heap_committed_pages: usize = 0;
+var user_preemptions: usize = 0;
+var expected_user_fault: UserFaultProbe = .none;
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
@@ -56,6 +90,10 @@ extern var __text_end: u8;
 extern var __rodata_start: u8;
 extern var __rodata_end: u8;
 extern var __data_start: u8;
+extern var __user_text_start: u8;
+extern var __user_text_end: u8;
+extern var __user_rodata_start: u8;
+extern var __user_rodata_end: u8;
 extern var __stack_top: u8;
 extern const __exception_vectors: u8;
 extern const __rodata_execute_probe: u32;
@@ -107,6 +145,14 @@ fn verifyFloatingPointTrap() void {
 fn runScheduler() noreturn {
     cooperative_progress = @splat(0);
     preemptive_progress = @splat(0);
+    @atomicStore(usize, userProgressPointer(), 0, .release);
+    @atomicStore(usize, userTicksPointer(), 0, .release);
+    user_started = false;
+    user_exited = false;
+    user_exit_status = 0;
+    user_heap_committed_pages = 0;
+    user_preemptions = 0;
+    expected_user_fault = .none;
     @atomicStore(u8, &scheduling_phase, cooperative_phase, .release);
     kernel_scheduler.init(
         highMappedAddress(@intFromPtr(&schedulerTask)),
@@ -136,6 +182,8 @@ fn schedulerTask(task_id: usize) callconv(.c) noreturn {
         schedulerYield();
     }
 
+    if (task_id == user_task_id) enterUserMode();
+
     var previous_ticks = timer.ticks();
     while (true) {
         const progress = @atomicLoad(usize, &preemptive_progress[task_id], .acquire);
@@ -153,6 +201,11 @@ fn schedulerYield() void {
     asm volatile ("svc #0" ::: .{ .memory = true });
 }
 
+fn enterUserMode() noreturn {
+    asm volatile ("svc #1" ::: .{ .memory = true });
+    schedulerFailed();
+}
+
 fn cooperativeProgressComplete() bool {
     for (&cooperative_progress) |*progress| {
         if (@atomicLoad(usize, progress, .acquire) < cooperative_progress_limit) return false;
@@ -161,10 +214,11 @@ fn cooperativeProgressComplete() bool {
 }
 
 fn preemptiveProgressComplete() bool {
-    for (&preemptive_progress) |*progress| {
-        if (@atomicLoad(usize, progress, .acquire) < preemptive_progress_limit) return false;
+    for (0..user_task_id) |task| {
+        if (@atomicLoad(usize, &preemptive_progress[task], .acquire) < preemptive_progress_limit) return false;
     }
-    return true;
+    return user_exited and
+        @atomicLoad(usize, userProgressPointer(), .acquire) == preemptive_progress_limit;
 }
 
 fn finishScheduler() noreturn {
@@ -175,12 +229,24 @@ fn finishScheduler() noreturn {
     {
         schedulerFailed();
     }
-    for (0..scheduler.task_count) |task| {
+    for (0..user_task_id) |task| {
         if (@atomicLoad(usize, &preemptive_progress[task], .acquire) != preemptive_progress_limit or
             kernel_scheduler.preemptiveDispatches(task) == 0)
         {
             schedulerFailed();
         }
+    }
+    if (!user_started or
+        !user_exited or
+        user_exit_status != 0 or
+        user_heap_committed_pages != 1 or
+        user_preemptions == 0 or
+        expected_user_fault != .none or
+        @atomicLoad(usize, userProgressPointer(), .acquire) != preemptive_progress_limit or
+        @atomicLoad(usize, userTicksPointer(), .acquire) < user_tick_target or
+        kernel_scheduler.preemptiveDispatches(user_task_id) == 0)
+    {
+        schedulerFailed();
     }
 
     KernelConsole.writeHex("TIMER:TICKS=", timer.ticks());
@@ -188,12 +254,23 @@ fn finishScheduler() noreturn {
     KernelConsole.write("IRQ:OK\n");
     KernelConsole.writeHex("SCHED:TASK0_PROGRESS=", preemptive_progress[0]);
     KernelConsole.writeHex("SCHED:TASK1_PROGRESS=", preemptive_progress[1]);
-    KernelConsole.writeHex("SCHED:TASK2_PROGRESS=", preemptive_progress[2]);
+    KernelConsole.writeHex("SCHED:TASK2_PROGRESS=", @atomicLoad(usize, userProgressPointer(), .acquire));
+    KernelConsole.writeHex("USER:PREEMPTIONS=", user_preemptions);
     KernelConsole.writeHex("SCHED:PREEMPTIONS=", kernel_scheduler.preemptions());
     KernelConsole.write("SCHED:PREEMPTIVE_OK\n");
+    KernelConsole.write("USER:SYSCALLS_OK\n");
+    KernelConsole.write("USER:OK\n");
     KernelConsole.write("SCHED:OK\n");
     KernelConsole.write("BOOT:OK\n");
     halt();
+}
+
+fn userProgressPointer() *usize {
+    return @ptrFromInt(user_data_address);
+}
+
+fn userTicksPointer() *usize {
+    return @ptrFromInt(user_data_address + @sizeOf(usize));
 }
 
 fn initializeMemory(dtb_address: usize) void {
@@ -230,14 +307,50 @@ fn initializeMmu() noreturn {
     const rodata_start: u64 = @intFromPtr(&__rodata_start);
     const rodata_end: u64 = @intFromPtr(&__rodata_end);
     const data_start: u64 = @intFromPtr(&__data_start);
+    const user_text_start: u64 = @intFromPtr(&__user_text_start);
+    const user_text_end: u64 = @intFromPtr(&__user_text_end);
+    const user_rodata_start: u64 = @intFromPtr(&__user_rodata_start);
+    const user_rodata_end: u64 = @intFromPtr(&__user_rodata_end);
+    const user_memory_start: u64 = @intFromPtr(&user_memory);
     const kernel_end: u64 = @intFromPtr(&__kernel_end);
+    if (user_text_end - user_text_start != mmu.page_size or
+        user_rodata_end - user_rodata_start != mmu.page_size)
+    {
+        mmuFailed();
+    }
 
     identity_map.map(text_start, text_end, .normal_read_execute) catch mmuFailed();
+    identity_map.map(user_text_start, user_text_end, .normal_read_execute) catch mmuFailed();
+    identity_map.map(user_rodata_start, user_rodata_end, .normal_read_only) catch mmuFailed();
     identity_map.map(rodata_start, rodata_end, .normal_read_only) catch mmuFailed();
     identity_map.map(data_start, kernel_end, .normal_read_write) catch mmuFailed();
     for (uart.mmio_regions) |region| {
         identity_map.map(region.start, region.end, .device_read_write) catch mmuFailed();
     }
+    identity_map.mapAt(
+        user_text_address,
+        user_text_start,
+        user_text_end - user_text_start,
+        .user_read_execute,
+    ) catch mmuFailed();
+    identity_map.mapAt(
+        user_rodata_address,
+        user_rodata_start,
+        user_rodata_end - user_rodata_start,
+        .user_read_only,
+    ) catch mmuFailed();
+    identity_map.mapAt(
+        user_data_address,
+        user_memory_start + @offsetOf(UserMemory, "data"),
+        @sizeOf(@FieldType(UserMemory, "data")),
+        .user_read_write,
+    ) catch mmuFailed();
+    identity_map.mapAt(
+        user_stack_address,
+        user_memory_start + @offsetOf(UserMemory, "stack"),
+        @sizeOf(@FieldType(UserMemory, "stack")),
+        .user_read_write,
+    ) catch mmuFailed();
     mapHighHalf(text_start, text_end, .normal_read_execute);
     mapHighHalf(rodata_start, rodata_end, .normal_read_only);
     mapHighHalf(data_start, kernel_end, .normal_read_write);
@@ -290,6 +403,13 @@ fn kernelHighMain() callconv(.c) noreturn {
     if (identity_map.descriptor(physical_start) != null) mmuFailed();
     for (uart.mmio_regions) |region| {
         if (identity_map.descriptor(region.start) == null) mmuFailed();
+    }
+    if (identity_map.descriptor(user_text_address) == null or
+        identity_map.descriptor(user_data_address) == null or
+        identity_map.descriptor(user_stack_address) == null or
+        identity_map.descriptor(user_heap_address) != null)
+    {
+        mmuFailed();
     }
 
     KernelConsole.write("MMU:HIGH_HALF\n");
@@ -361,18 +481,19 @@ pub export fn exceptionHandler(
     vector: usize,
     frame: *exceptions.Frame,
 ) callconv(.c) *exceptions.Frame {
-    if (builtin.cpu.arch == .aarch64 and uart.supports_timer_interrupts and vector == 5) {
-        return handleIrq(frame);
+    if (builtin.cpu.arch == .aarch64 and uart.supports_timer_interrupts and (vector == 5 or vector == 9)) {
+        return handleIrq(vector, frame);
     }
     if (handleMmuProbe(vector, frame)) return frame;
     if (handleFloatingPointProbe(vector, frame)) return frame;
+    if (handleUserFault(vector, frame)) return frame;
     if (builtin.cpu.arch == .aarch64 and
         uart.supports_timer_interrupts and
         scheduling_enabled and
-        vector == 4 and
         exceptions.class(frame.esr) == exceptions.supervisor_call_class)
     {
-        return kernel_scheduler.dispatch(frame, .cooperative) catch schedulerFailed();
+        if (vector == 4) return handleKernelSupervisorCall(frame);
+        if (vector == 8) return handleUserSyscall(frame);
     }
 
     KernelConsole.writeHex("EXCEPTION:VECTOR=", vector);
@@ -390,6 +511,156 @@ pub export fn exceptionHandler(
 
     KernelConsole.write("EXCEPTION:UNHANDLED\n");
     halt();
+}
+
+fn handleKernelSupervisorCall(frame: *exceptions.Frame) *exceptions.Frame {
+    const immediate = frame.esr & 0xffff;
+    if (immediate == 0) {
+        return kernel_scheduler.dispatch(frame, .cooperative) catch schedulerFailed();
+    }
+    if (immediate != 1 or
+        kernel_scheduler.currentTask() != user_task_id or
+        @atomicLoad(u8, &scheduling_phase, .acquire) != preemptive_phase or
+        user_started)
+    {
+        schedulerFailed();
+    }
+
+    exceptions.setUserStackPointer(user_stack_address + user_stack_pages * mmu.page_size);
+    frame.registers = @splat(0);
+    frame.elr = user_text_address;
+    frame.spsr = user_initial_spsr;
+    frame.esr = 0;
+    frame.far = 0;
+    user_started = true;
+    expected_user_fault = .uart;
+    KernelConsole.writeHex("USER:ABI_VERSION=", syscall.abi_version);
+    KernelConsole.write("USER:ENTER_EL0\n");
+    return frame;
+}
+
+fn handleUserSyscall(frame: *exceptions.Frame) *exceptions.Frame {
+    if (kernel_scheduler.currentTask() != user_task_id or !user_started or user_exited) schedulerFailed();
+    const number = if (frame.esr & 0xffff == 0) syscall.decode(frame.registers[8]) else null;
+    const decoded = number orelse {
+        frame.registers[0] = syscall.errorResult(.invalid_syscall);
+        KernelConsole.write("USER:BAD_SYSCALL_REJECTED\n");
+        return frame;
+    };
+    switch (decoded) {
+        .write => {
+            const address = frame.registers[0];
+            const length = frame.registers[1];
+            if (length == 0) {
+                frame.registers[0] = 0;
+                return frame;
+            }
+            if (length > max_user_write or !isUserReadable(address, length)) {
+                frame.registers[0] = syscall.errorResult(.invalid_address);
+                KernelConsole.write("USER:BAD_POINTER_REJECTED\n");
+                return frame;
+            }
+            const bytes: [*]const u8 = @ptrFromInt(address);
+            KernelConsole.write(bytes[0..@intCast(length)]);
+            frame.registers[0] = length;
+            return frame;
+        },
+        .yield => {
+            frame.registers[0] = 0;
+            KernelConsole.write("USER:YIELD\n");
+            return kernel_scheduler.dispatch(frame, .cooperative) catch schedulerFailed();
+        },
+        .exit => {
+            user_exit_status = frame.registers[0];
+            user_exited = true;
+            KernelConsole.writeHex("USER:EXIT=", user_exit_status);
+            return kernel_scheduler.blockCurrent(frame) catch schedulerFailed();
+        },
+        .grow => {
+            const requested_pages = frame.registers[0];
+            if (heapGrowthError(user_heap_committed_pages, requested_pages)) |growth_error| {
+                frame.registers[0] = syscall.errorResult(growth_error);
+                if (growth_error == .out_of_memory) KernelConsole.write("USER:HEAP_LIMIT_ENFORCED\n");
+                return frame;
+            }
+            const previous_break = user_heap_address + user_heap_committed_pages * mmu.page_size;
+            const physical_heap = physicalMappedAddress(@intFromPtr(&user_memory)) +
+                @offsetOf(UserMemory, "heap") +
+                user_heap_committed_pages * mmu.page_size;
+            identity_map.mapAt(
+                previous_break,
+                physical_heap,
+                requested_pages * mmu.page_size,
+                .user_read_write,
+            ) catch schedulerFailed();
+            user_heap_committed_pages += @intCast(requested_pages);
+            mmu.invalidateAll();
+            frame.registers[0] = previous_break;
+            KernelConsole.writeHex("USER:HEAP_PAGES=", user_heap_committed_pages);
+            return frame;
+        },
+    }
+}
+
+fn heapGrowthError(committed_pages: usize, requested_pages: u64) ?syscall.ErrorCode {
+    if (requested_pages == 0) return .invalid_argument;
+    if (committed_pages > user_heap_pages or requested_pages > user_heap_pages - committed_pages) {
+        return .out_of_memory;
+    }
+    return null;
+}
+
+fn isUserReadable(address: u64, length: u64) bool {
+    if (length == 0) return true;
+    if (address > std.math.maxInt(u64) - length) return false;
+    const end = address + length;
+    return rangeContains(user_text_address, mmu.page_size, address, end) or
+        rangeContains(user_rodata_address, mmu.page_size, address, end) or
+        rangeContains(user_data_address, user_data_pages * mmu.page_size, address, end) or
+        rangeContains(user_stack_address, user_stack_pages * mmu.page_size, address, end) or
+        rangeContains(
+            user_heap_address,
+            user_heap_committed_pages * mmu.page_size,
+            address,
+            end,
+        );
+}
+
+fn rangeContains(base: u64, size: u64, start: u64, end: u64) bool {
+    return start >= base and end <= base + size;
+}
+
+fn handleUserFault(vector: usize, frame: *exceptions.Frame) bool {
+    if (!user_started or
+        user_exited or
+        vector != 8 or
+        exceptions.class(frame.esr) != data_abort_lower_el or
+        frame.esr & write_not_read != 0)
+    {
+        return false;
+    }
+
+    const fault_status = frame.esr & fault_status_mask;
+    switch (expected_user_fault) {
+        .none => return false,
+        .uart => {
+            if (frame.far != 0x0900_0000 or fault_status != permission_fault_level_three) return false;
+            expected_user_fault = .kernel;
+            KernelConsole.write("USER:UART_DENIED\n");
+        },
+        .kernel => {
+            if (frame.far != physicalMappedAddress(@intFromPtr(&__kernel_start)) or
+                fault_status < translation_fault_first or
+                fault_status > translation_fault_last)
+            {
+                return false;
+            }
+            expected_user_fault = .none;
+            KernelConsole.write("USER:KERNEL_DENIED\n");
+        },
+    }
+    frame.elr += 4;
+    return true;
 }
 
 fn handleFloatingPointProbe(vector: usize, frame: *exceptions.Frame) bool {
@@ -451,11 +722,15 @@ fn matchesMmuProbe(probe: MmuProbe, esr: u64, far: u64, expected_address: usize)
     };
 }
 
-fn handleIrq(frame: *exceptions.Frame) *exceptions.Frame {
+fn handleIrq(vector: usize, frame: *exceptions.Frame) *exceptions.Frame {
     const acknowledgement = uart.gic.acknowledge();
     const interrupt_id = uart.gic.interruptId(acknowledgement);
     if (interrupt_id == uart.gic.physical_timer_interrupt) {
         timer.handleInterrupt();
+        if (vector == 9) user_preemptions += 1;
+        if (user_started and !user_exited) {
+            @atomicStore(usize, userTicksPointer(), timer.ticks(), .release);
+        }
         uart.gic.end(acknowledgement);
         if (scheduling_enabled) {
             return kernel_scheduler.dispatch(frame, .preemptive) catch schedulerFailed();
@@ -497,6 +772,7 @@ fn resetTestOutput() void {
 test {
     _ = mmu;
     _ = scheduler;
+    _ = syscall;
 }
 
 test "panic output uses the serial CRLF convention" {
@@ -614,4 +890,22 @@ test "MMU probes classify permission and translation faults" {
         address,
         address,
     ));
+}
+
+test "user-readable ranges reject overflow and uncommitted heap pages" {
+    user_heap_committed_pages = 1;
+    defer user_heap_committed_pages = 0;
+
+    try std.testing.expect(isUserReadable(user_rodata_address, mmu.page_size));
+    try std.testing.expect(isUserReadable(user_heap_address, mmu.page_size));
+    try std.testing.expect(!isUserReadable(user_rodata_address + mmu.page_size - 1, 2));
+    try std.testing.expect(!isUserReadable(user_heap_address + mmu.page_size, 1));
+    try std.testing.expect(!isUserReadable(std.math.maxInt(u64), 2));
+}
+
+test "heap growth is nonzero and bounded by its fixed window" {
+    try std.testing.expectEqual(syscall.ErrorCode.invalid_argument, heapGrowthError(0, 0).?);
+    try std.testing.expectEqual(null, heapGrowthError(0, user_heap_pages));
+    try std.testing.expectEqual(syscall.ErrorCode.out_of_memory, heapGrowthError(1, user_heap_pages).?);
+    try std.testing.expectEqual(syscall.ErrorCode.out_of_memory, heapGrowthError(user_heap_pages + 1, 1).?);
 }

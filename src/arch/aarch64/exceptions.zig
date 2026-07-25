@@ -28,6 +28,13 @@ pub fn disableFloatingPoint() void {
     asm volatile ("isb");
 }
 
+pub fn setUserStackPointer(address: u64) void {
+    asm volatile ("msr SP_EL0, %[value]"
+        :
+        : [value] "r" (address),
+        : .{ .memory = true });
+}
+
 test "exception class is decoded from ESR bits 31 through 26" {
     try std.testing.expectEqual(breakpoint_class, class(breakpoint_class << 26));
 }

@@ -20,8 +20,12 @@ the kernel, stack, and exception vectors into a protected `TTBR1_EL1`
 high-half mapping. The low kernel alias is removed while device mappings remain
 available through `TTBR0_EL1`. QEMU verifies this transition and page-granular
 W^X permissions; the updated image still needs a physical-board rerun. QEMU
-then runs three kernel threads on separate stacks, first with cooperative
-round-robin yields and then with 1,000 timer-driven preemptions.
+then runs three tasks on separate kernel stacks, first with cooperative
+round-robin yields. For the preemptive gate, task 2 enters EL0 with fixed
+user text, data, stack, and bounded heap mappings while tasks 0 and 1 remain
+EL1 progress witnesses. The EL0 fixture uses the versioned project ABI for
+`write`, `yield`, `exit`, and memory growth and
+is preempted during the same 1,000-tick timer run.
 
 ## Requirements
 
@@ -116,11 +120,15 @@ run as suite setup and teardown hooks.
 The current QEMU checkpoint handles a deliberate `brk` through the EL1h
 synchronous vector, reports ESR/ELR/SPSR/FAR, and resumes after the trapped
 instruction. It disables FP/SIMD and proves an accidental floating-point
-instruction traps visibly. Three kernel threads then make bounded progress on
-separate 16 KiB stacks: first through 95 cooperative round-robin switches,
-then through exactly 1,000 allocation- and logging-free timer preemptions. The
-checkpoint emits `SCHED:OK` and `BOOT:OK` before QEMU is terminated by the
-smoke-test timeout.
+instruction traps visibly. Three tasks then make bounded progress on separate
+16 KiB kernel stacks: first through 95 cooperative round-robin switches, then
+through exactly 1,000 allocation- and logging-free timer preemptions. During
+the preemptive gate, task 2 runs an assembly fixture at EL0. The fixture proves
+versioned syscall decoding, checked user pointers, cooperative user yield,
+on-demand growth within a four-page heap window, clean exit, and direct-access
+faults for UART and removed kernel mappings. Tasks 0 and 1 continue as EL1
+preemption witnesses. The checkpoint emits `USER:OK`, `SCHED:OK`, and
+`BOOT:OK` before QEMU is terminated by the smoke-test timeout.
 Before exception testing, it parses the QEMU DTB, reserves firmware, DTB, and
 kernel-owned memory, sweeps all allocatable frames, and emits `MEMORY:OK`.
 It then enables a protected identity map, installs the kernel's high-half
@@ -160,3 +168,7 @@ and Zig source locations.
 - Phase 6: complete on QEMU — three separate kernel stacks, cooperative yields,
   exception-return context switching, FP/SIMD trapping, and timer preemption
   are enforced by the smoke gate
+- Phase 7: complete on QEMU — task 2 enters EL0, uses the versioned
+  `write`/`yield`/`exit`/bounded-growth ABI, is timer-preempted, and cannot
+  directly access UART or kernel memory; independent process address spaces
+  remain Phase 8 work

@@ -11,6 +11,7 @@ pub const Reason = enum {
 
 pub const DispatchError = error{
     NotRunning,
+    NoRunnableTask,
 };
 
 const task_stack = [stack_size]u8;
@@ -22,12 +23,14 @@ pub const Scheduler = struct {
     cooperative_switch_count: usize = 0,
     preemption_count: usize = 0,
     preemptive_dispatch_counts: [task_count]usize = @splat(0),
+    runnable: [task_count]bool = @splat(true),
 
     pub fn init(self: *Scheduler, entry: u64, spsr: u64) void {
         self.current = null;
         self.cooperative_switch_count = 0;
         self.preemption_count = 0;
         self.preemptive_dispatch_counts = @splat(0);
+        self.runnable = @splat(true);
 
         for (&self.stacks, 0..) |*stack, index| {
             const stack_top = @intFromPtr(stack) + stack_size;
@@ -52,7 +55,7 @@ pub const Scheduler = struct {
         };
 
         self.frames[current] = current_frame;
-        const next = (current + 1) % task_count;
+        const next = self.nextRunnable(current) orelse return error.NoRunnableTask;
         self.current = next;
         switch (reason) {
             .cooperative => self.cooperative_switch_count += 1,
@@ -62,6 +65,22 @@ pub const Scheduler = struct {
             },
         }
         return self.frames[next];
+    }
+
+    pub fn blockCurrent(
+        self: *Scheduler,
+        current_frame: *exceptions.Frame,
+    ) DispatchError!*exceptions.Frame {
+        const current = self.current orelse return error.NotRunning;
+        self.frames[current] = current_frame;
+        self.runnable[current] = false;
+        const next = self.nextRunnable(current) orelse return error.NoRunnableTask;
+        self.current = next;
+        return self.frames[next];
+    }
+
+    pub fn currentTask(self: *const Scheduler) ?usize {
+        return self.current;
     }
 
     pub fn cooperativeSwitches(self: *const Scheduler) usize {
@@ -74,6 +93,14 @@ pub const Scheduler = struct {
 
     pub fn preemptiveDispatches(self: *const Scheduler, task: usize) usize {
         return self.preemptive_dispatch_counts[task];
+    }
+
+    fn nextRunnable(self: *const Scheduler, current: usize) ?usize {
+        for (1..task_count + 1) |distance| {
+            const candidate = (current + distance) % task_count;
+            if (self.runnable[candidate]) return candidate;
+        }
+        return null;
     }
 };
 
@@ -118,4 +145,20 @@ test "scheduler rejects preemption before its first dispatch" {
     var frame = std.mem.zeroes(exceptions.Frame);
 
     try std.testing.expectError(error.NotRunning, scheduler.dispatch(&frame, .preemptive));
+}
+
+test "blocked tasks are skipped by subsequent dispatches" {
+    var scheduler: Scheduler = .{};
+    scheduler.init(0x1000, 0x345);
+    var boot_frame = std.mem.zeroes(exceptions.Frame);
+
+    const first = try scheduler.dispatch(&boot_frame, .cooperative);
+    const second = try scheduler.dispatch(first, .cooperative);
+    const third = try scheduler.dispatch(second, .cooperative);
+    const first_after_block = try scheduler.blockCurrent(third);
+    const second_again = try scheduler.dispatch(first_after_block, .preemptive);
+
+    try std.testing.expectEqual(@as(u64, 0), first_after_block.registers[0]);
+    try std.testing.expectEqual(@as(u64, 1), second_again.registers[0]);
+    try std.testing.expectEqual(@as(usize, 1), scheduler.preemptions());
 }

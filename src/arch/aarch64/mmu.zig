@@ -17,6 +17,9 @@ pub const Mapping = enum {
     normal_read_only,
     normal_read_write,
     device_read_write,
+    user_read_execute,
+    user_read_only,
+    user_read_write,
 };
 
 pub const DescriptorError = error{
@@ -49,6 +52,8 @@ const descriptor_type: u64 = descriptor_valid | descriptor_table_or_page;
 const attribute_index_shift = 2;
 const normal_attribute_index: u64 = 1 << attribute_index_shift;
 const access_read_only: u64 = 0b10 << 6;
+const access_user_read_write: u64 = 0b01 << 6;
+const access_user_read_only: u64 = 0b11 << 6;
 const outer_shareable: u64 = 0b10 << 8;
 const inner_shareable: u64 = 0b11 << 8;
 const access_flag: u64 = 1 << 10;
@@ -241,6 +246,20 @@ pub fn pageDescriptor(output_address: u64, mapping: Mapping) DescriptorError!u64
         .device_read_write => outer_shareable |
             privileged_execute_never |
             unprivileged_execute_never,
+        .user_read_execute => normal_attribute_index |
+            inner_shareable |
+            access_user_read_only |
+            privileged_execute_never,
+        .user_read_only => normal_attribute_index |
+            inner_shareable |
+            access_user_read_only |
+            privileged_execute_never |
+            unprivileged_execute_never,
+        .user_read_write => normal_attribute_index |
+            inner_shareable |
+            access_user_read_write |
+            privileged_execute_never |
+            unprivileged_execute_never,
     };
     return try encodeOutputAddress(output_address) |
         descriptor_type |
@@ -422,6 +441,21 @@ test "device mappings use Attr0 and cannot execute" {
     try std.testing.expectEqual(
         @as(u64, 0x0060_0000_0900_0603),
         try pageDescriptor(0x0900_0000, .device_read_write),
+    );
+}
+
+test "user mappings are accessible only with their requested permissions" {
+    try std.testing.expectEqual(
+        @as(u64, 0x0020_0000_0040_07c7),
+        try pageDescriptor(0x0040_0000, .user_read_execute),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x0060_0000_0040_07c7),
+        try pageDescriptor(0x0040_0000, .user_read_only),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x0060_0000_0040_0747),
+        try pageDescriptor(0x0040_0000, .user_read_write),
     );
 }
 
