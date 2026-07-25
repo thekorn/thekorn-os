@@ -260,7 +260,7 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: Phase 5 in progress · Phase 2 hardware gate passed</span>
+            <span class="meta">Status: Phase 5 QEMU gate passed · hardware rerun pending</span>
             <span class="meta">Updated: 2026-07-25</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0 through 4 are complete and Phase 5 is in progress. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. The Phase 2 baseline has booted successfully on a physical Pi 4: it enters EL1h, reports boot facts over PL011, discovers memory from the firmware DTB, emits <code>MEMORY:OK</code>, handles and returns from the deliberate <code>brk</code>, and emits <code>BOOT:OK</code>. QEMU additionally verifies a protected four-level identity map, predictable W^X and unmapped-address faults, and 1,000 generic physical timer interrupts through its GICv2. The updated Phase 5 image still needs a physical-board rerun before the separate high-half transition begins.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0 through 4 are complete and Phase 5 is in progress. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. The Phase 2 baseline has booted successfully on a physical Pi 4: it enters EL1h, reports boot facts over PL011, discovers memory from the firmware DTB, emits <code>MEMORY:OK</code>, handles and returns from the deliberate <code>brk</code>, and emits <code>BOOT:OK</code>. QEMU additionally verifies a protected four-level identity map, a high-half <code>TTBR1_EL1</code> transition with the PC, stack, and exception vectors moved high, removal of the low kernel alias, predictable W^X and unmapped-address faults, and 1,000 generic physical timer interrupts through its GICv2. The updated Phase 5 image still needs a physical-board rerun.</p>
         </section>
 
         <section id="strategy">
@@ -389,7 +389,7 @@
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 5</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><span class="status recommended">In progress · identity map verified in QEMU</span><h3>Identity map, then a protected high-half kernel</h3><p>Build 4 KiB translation tables with normal-memory and device attributes. First enable a minimal identity map and verify text RX, rodata R/NX, data/stacks/heap RW/NX, and MMIO device RW/NX. In a separate step, map the kernel through <code>TTBR1_EL1</code> and branch high. Use barriers around MAIR, TCR, TTBR, TLB, and SCTLR changes.</p><div class="tags"><span class="tag">identity map</span><span class="tag">TTBR1</span><span class="tag">high half</span><span class="tag">W^X</span></div><div class="exit"><strong>Identity-map gate verified in QEMU:</strong> text writes, rodata/data execution, and unmapped writes fault predictably; console, exceptions, and timer interrupts survive MMU and cache activation. <strong>Phase exit:</strong> repeat the gate on hardware, then complete the high-half transition before EL0 work starts.</div></div>
+              <div class="milestone-body"><span class="status recommended">In progress · high half verified in QEMU</span><h3>Identity map, then a protected high-half kernel</h3><p>Build 4 KiB translation tables with normal-memory and device attributes. First enable a minimal identity map and verify text RX, rodata R/NX, data/stacks/heap RW/NX, and MMIO device RW/NX. In a separate step, map the kernel through <code>TTBR1_EL1</code> and branch high. Use barriers around MAIR, TCR, TTBR, TLB, and SCTLR changes.</p><div class="tags"><span class="tag">identity map</span><span class="tag">TTBR1</span><span class="tag">high half</span><span class="tag">W^X</span></div><div class="exit"><strong>QEMU gate verified:</strong> the PC, stack, and exception vectors move high; the low kernel alias, text writes, rodata/data execution, and unmapped writes fault predictably; console, exceptions, and timer interrupts survive the transition. <strong>Phase exit:</strong> repeat the complete gate on physical hardware before EL0 work starts.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 6</div><div class="rail"><span class="dot"></span></div>

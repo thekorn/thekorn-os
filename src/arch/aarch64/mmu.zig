@@ -28,11 +28,13 @@ pub const MapError = DescriptorError || error{
     EmptyRange,
     TableCapacityExceeded,
     ConflictingMapping,
+    UnmappedAddress,
 };
 
 // Attr0 is Device-nGnRnE. Attr1 is normal, inner/outer write-back,
 // non-transient, read-allocate, and write-allocate memory.
 pub const mair_el1: u64 = @as(u64, 0xff) << 8;
+pub const high_half_base: u64 = 0xffff_0000_0000_0000;
 const sctlr_enable_value: u64 = 0x30d0_0800 |
     (1 << 0) | // M: MMU enable.
     (1 << 2) | // C: data and unified cache enable.
@@ -52,6 +54,7 @@ const inner_shareable: u64 = 0b11 << 8;
 const access_flag: u64 = 1 << 10;
 const privileged_execute_never: u64 = 1 << 53;
 const unprivileged_execute_never: u64 = 1 << 54;
+const physical_address_mask: u64 = 0x0000_ffff_ffff_ffff;
 const output_address_mask: u64 = 0x0000_ffff_ffff_f000;
 const page_offset_mask: u64 = page_size - 1;
 const level_zero_shift = 39;
@@ -81,10 +84,46 @@ pub const IdentityMap = struct {
     pub fn map(self: *IdentityMap, start: u64, end: u64, mapping: Mapping) MapError!void {
         if (start == end) return error.EmptyRange;
         if (start > end) return error.AddressOutOfRange;
+        try self.mapAt(start, start, end - start, mapping);
+    }
+
+    pub fn mapAt(
+        self: *IdentityMap,
+        virtual_start: u64,
+        physical_start: u64,
+        size: u64,
+        mapping: Mapping,
+    ) MapError!void {
+        if (size == 0) return error.EmptyRange;
+        if (virtual_start & page_offset_mask != 0 or
+            physical_start & page_offset_mask != 0 or
+            size & page_offset_mask != 0)
+        {
+            return error.UnalignedAddress;
+        }
+        if (virtual_start > std.math.maxInt(u64) - (size - page_size) or
+            physical_start > physical_address_mask - (size - page_size))
+        {
+            return error.AddressOutOfRange;
+        }
+
+        var offset: u64 = 0;
+        while (offset < size) : (offset += page_size) {
+            try self.mapPage(virtual_start + offset, physical_start + offset, mapping);
+        }
+    }
+
+    pub fn unmap(self: *IdentityMap, start: u64, end: u64) MapError!void {
+        if (start == end) return error.EmptyRange;
+        if (start > end) return error.AddressOutOfRange;
         if (start & page_offset_mask != 0 or end & page_offset_mask != 0) return error.UnalignedAddress;
 
         var address = start;
-        while (address < end) : (address += page_size) try self.mapPage(address, mapping);
+        while (address < end) : (address += page_size) {
+            if (self.descriptor(address) == null) return error.UnmappedAddress;
+        }
+        address = start;
+        while (address < end) : (address += page_size) self.descriptorPointer(address).?.* = 0;
     }
 
     pub fn rootAddress(self: *const IdentityMap) u64 {
@@ -101,18 +140,33 @@ pub const IdentityMap = struct {
         return if (descriptor_value == 0) null else descriptor_value;
     }
 
-    fn mapPage(self: *IdentityMap, address: u64, mapping: Mapping) MapError!void {
-        _ = try encodeOutputAddress(address);
-        try self.installLevelOne(tableIndex(address, level_zero_shift));
-        const level_two_table = try self.getOrCreateLevelTwo(tableIndex(address, level_one_shift));
+    fn mapPage(
+        self: *IdentityMap,
+        virtual_address: u64,
+        physical_address: u64,
+        mapping: Mapping,
+    ) MapError!void {
+        _ = try encodeOutputAddress(physical_address);
+        try self.installLevelOne(tableIndex(virtual_address, level_zero_shift));
+        const level_two_table = try self.getOrCreateLevelTwo(tableIndex(virtual_address, level_one_shift));
         const level_three_table = try self.getOrCreateLevelThree(
             level_two_table,
-            tableIndex(address, level_two_shift),
+            tableIndex(virtual_address, level_two_shift),
         );
-        const entry = &self.level_three[level_three_table].entries[tableIndex(address, level_three_shift)];
-        const descriptor_value = try pageDescriptor(address, mapping);
+        const entry = &self.level_three[level_three_table].entries[tableIndex(virtual_address, level_three_shift)];
+        const descriptor_value = try pageDescriptor(physical_address, mapping);
         if (entry.* != 0 and entry.* != descriptor_value) return error.ConflictingMapping;
         entry.* = descriptor_value;
+    }
+
+    fn descriptorPointer(self: *IdentityMap, address: u64) ?*u64 {
+        if (self.root_entry != tableIndex(address, level_zero_shift)) return null;
+        const level_one_index = tableIndex(address, level_one_shift);
+        const level_two_table = self.findLevelTwo(level_one_index) orelse return null;
+        const level_two_entry = tableIndex(address, level_two_shift);
+        const level_three_table = self.findLevelThree(level_two_table, level_two_entry) orelse return null;
+        const descriptor_pointer = &self.level_three[level_three_table].entries[tableIndex(address, level_three_shift)];
+        return if (descriptor_pointer.* == 0) null else descriptor_pointer;
     }
 
     fn installLevelOne(self: *IdentityMap, entry: usize) MapError!void {
@@ -195,10 +249,7 @@ pub fn pageDescriptor(output_address: u64, mapping: Mapping) DescriptorError!u64
 }
 
 pub fn enable(root_address: u64) void {
-    const physical_address_range = asm volatile ("mrs %[value], ID_AA64MMFR0_EL1"
-        : [value] "=r" (-> u64),
-    ) & 0xf;
-    const tcr_el1 = translationControl(@intCast(@min(physical_address_range, 5)));
+    const tcr_el1 = translationControl(physicalAddressRange(), false);
 
     asm volatile ("dsb sy" ::: .{ .memory = true });
     asm volatile ("msr MAIR_EL1, %[value]"
@@ -228,6 +279,29 @@ pub fn enable(root_address: u64) void {
     asm volatile ("isb");
 }
 
+pub fn enableHighHalf(root_address: u64) void {
+    const tcr_el1 = translationControl(physicalAddressRange(), true);
+
+    asm volatile ("dsb sy" ::: .{ .memory = true });
+    asm volatile ("msr TTBR1_EL1, %[value]"
+        :
+        : [value] "r" (root_address),
+        : .{ .memory = true });
+    asm volatile ("msr TCR_EL1, %[value]"
+        :
+        : [value] "r" (tcr_el1),
+        : .{ .memory = true });
+    asm volatile ("isb");
+    invalidateAll();
+}
+
+pub fn invalidateAll() void {
+    asm volatile ("dsb sy" ::: .{ .memory = true });
+    asm volatile ("tlbi vmalle1" ::: .{ .memory = true });
+    asm volatile ("dsb sy" ::: .{ .memory = true });
+    asm volatile ("isb");
+}
+
 pub fn isEnabled() bool {
     const sctlr_el1 = asm volatile ("mrs %[value], SCTLR_EL1"
         : [value] "=r" (-> u64),
@@ -235,18 +309,69 @@ pub fn isEnabled() bool {
     return sctlr_el1 & 1 != 0;
 }
 
-fn translationControl(physical_address_range: u3) u64 {
+pub fn highAddress(physical_address: u64) DescriptorError!u64 {
+    if (physical_address & ~physical_address_mask != 0) return error.AddressOutOfRange;
+    return high_half_base | physical_address;
+}
+
+pub fn physicalAddress(high_address: u64) DescriptorError!u64 {
+    if (!isHighAddress(high_address)) return error.AddressOutOfRange;
+    return high_address & physical_address_mask;
+}
+
+pub fn isHighAddress(address: u64) bool {
+    return address & high_half_base == high_half_base;
+}
+
+pub fn currentProgramCounter() u64 {
+    return asm volatile ("adr %[value], ."
+        : [value] "=r" (-> u64),
+    );
+}
+
+pub fn currentStackPointer() u64 {
+    return asm volatile ("mov %[value], sp"
+        : [value] "=r" (-> u64),
+    );
+}
+
+pub fn vectorBase() u64 {
+    return asm volatile ("mrs %[value], VBAR_EL1"
+        : [value] "=r" (-> u64),
+    );
+}
+
+fn physicalAddressRange() u3 {
+    const supported_range = asm volatile ("mrs %[value], ID_AA64MMFR0_EL1"
+        : [value] "=r" (-> u64),
+    ) & 0xf;
+    return @intCast(@min(supported_range, 5));
+}
+
+fn translationControl(physical_address_range: u3, enable_ttbr1: bool) u64 {
     const t0sz_48_bit = 16;
     const inner_write_back = @as(u64, 0b01) << 8;
     const outer_write_back = @as(u64, 0b01) << 10;
     const inner_shareable_walk = @as(u64, 0b11) << 12;
     const disable_ttbr1_walks = @as(u64, 1) << 23;
+    const t1sz_48_bit = @as(u64, 16) << 16;
+    const ttbr1_inner_write_back = @as(u64, 0b01) << 24;
+    const ttbr1_outer_write_back = @as(u64, 0b01) << 26;
+    const ttbr1_inner_shareable_walk = @as(u64, 0b11) << 28;
+    const ttbr1_4k_granule = @as(u64, 0b10) << 30;
     const intermediate_physical_size = @as(u64, physical_address_range) << 32;
     return t0sz_48_bit |
         inner_write_back |
         outer_write_back |
         inner_shareable_walk |
-        disable_ttbr1_walks |
+        (if (enable_ttbr1)
+            t1sz_48_bit |
+                ttbr1_inner_write_back |
+                ttbr1_outer_write_back |
+                ttbr1_inner_shareable_walk |
+                ttbr1_4k_granule
+        else
+            disable_ttbr1_walks) |
         intermediate_physical_size;
 }
 
@@ -345,8 +470,53 @@ test "identity map rejects invalid and conflicting ranges" {
     );
 }
 
-test "translation control configures cacheable 48-bit TTBR0 walks" {
-    try std.testing.expectEqual(@as(u64, 0x0000_0002_0080_3510), translationControl(2));
-    try std.testing.expectEqual(@as(u64, 0x0000_0005_0080_3510), translationControl(5));
+test "mapAt creates a protected high-half alias" {
+    var high_half: IdentityMap = .{};
+    const virtual_start = try highAddress(0x4008_0000);
+
+    try high_half.mapAt(virtual_start, 0x4008_0000, 0x2000, .normal_read_execute);
+
+    try std.testing.expectEqual(
+        try pageDescriptor(0x4008_0000, .normal_read_execute),
+        high_half.descriptor(virtual_start).?,
+    );
+    try std.testing.expectEqual(
+        try pageDescriptor(0x4008_1000, .normal_read_execute),
+        high_half.descriptor(virtual_start + page_size).?,
+    );
+    // TTBR0 and TTBR1 select distinct roots for the low and high halves, but
+    // both walks index their chosen root with the address's low 48 bits.
+    try std.testing.expectEqual(
+        high_half.descriptor(virtual_start),
+        high_half.descriptor(0x4008_0000),
+    );
+}
+
+test "unmap removes a complete range without disturbing other pages" {
+    var identity: IdentityMap = .{};
+    try identity.map(0x1000, 0x4000, .normal_read_write);
+
+    try identity.unmap(0x1000, 0x3000);
+
+    try std.testing.expectEqual(null, identity.descriptor(0x1000));
+    try std.testing.expectEqual(null, identity.descriptor(0x2000));
+    try std.testing.expect(identity.descriptor(0x3000) != null);
+    try std.testing.expectError(error.UnmappedAddress, identity.unmap(0x1000, 0x2000));
+}
+
+test "high-half address conversion preserves the low 48 bits" {
+    const high_address = try highAddress(0x4008_1234);
+
+    try std.testing.expectEqual(@as(u64, 0xffff_0000_4008_1234), high_address);
+    try std.testing.expect(isHighAddress(high_address));
+    try std.testing.expect(!isHighAddress(0x4008_1234));
+    try std.testing.expectEqual(@as(u64, 0x4008_1234), try physicalAddress(high_address));
+    try std.testing.expectError(error.AddressOutOfRange, physicalAddress(0x4008_1234));
+}
+
+test "translation control configures cacheable 48-bit TTBR walks" {
+    try std.testing.expectEqual(@as(u64, 0x0000_0002_0080_3510), translationControl(2, false));
+    try std.testing.expectEqual(@as(u64, 0x0000_0005_0080_3510), translationControl(5, false));
+    try std.testing.expectEqual(@as(u64, 0x0000_0002_b510_3510), translationControl(2, true));
     try std.testing.expectEqual(@as(u64, 0x30d8_181d), sctlr_enable_value);
 }

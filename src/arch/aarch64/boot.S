@@ -80,3 +80,12 @@ _start:
     b .Lpark
 
 .size _start, . - _start
+
+.global mmuEnterHighHalf
+.type mmuEnterHighHalf, %function
+mmuEnterHighHalf:
+    msr VBAR_EL1, x1
+    mov sp, x2
+    isb
+    br x0
+.size mmuEnterHighHalf, . - mmuEnterHighHalf

@@ -35,6 +35,11 @@ previous_line=0
 for marker in \
   '^MEMORY:OK' \
   '^MMU:ENABLED' \
+  '^MMU:HIGH_PC=0xffff' \
+  '^MMU:HIGH_SP=0xffff' \
+  '^MMU:HIGH_VBAR=0xffff' \
+  '^MMU:HIGH_HALF' \
+  '^MMU:LOW_ALIAS_UNMAPPED' \
   '^MMU:TEXT_RO' \
   '^MMU:RODATA_NX' \
   '^MMU:DATA_NX' \
