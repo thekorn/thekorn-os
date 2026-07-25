@@ -35,6 +35,12 @@ pub fn setUserStackPointer(address: u64) void {
         : .{ .memory = true });
 }
 
+pub fn userStackPointer() u64 {
+    return asm volatile ("mrs %[value], SP_EL0"
+        : [value] "=r" (-> u64),
+    );
+}
+
 test "exception class is decoded from ESR bits 31 through 26" {
     try std.testing.expectEqual(breakpoint_class, class(breakpoint_class << 26));
 }

@@ -53,6 +53,7 @@ words = [
     "Menlo",
     "NOLOAD",
     "OOM",
+    "PHDRS",
     "Pont",
     "PWM",
     "QEMU",

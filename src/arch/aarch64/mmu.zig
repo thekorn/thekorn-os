@@ -225,7 +225,11 @@ pub const IdentityMap = struct {
 };
 
 pub fn tableDescriptor(next_table_address: u64) DescriptorError!u64 {
-    return try encodeOutputAddress(next_table_address) | descriptor_type;
+    const output_address = if (isHighAddress(next_table_address))
+        try physicalAddress(next_table_address)
+    else
+        next_table_address;
+    return try encodeOutputAddress(output_address) | descriptor_type;
 }
 
 pub fn pageDescriptor(output_address: u64, mapping: Mapping) DescriptorError!u64 {
@@ -309,6 +313,16 @@ pub fn enableHighHalf(root_address: u64) void {
     asm volatile ("msr TCR_EL1, %[value]"
         :
         : [value] "r" (tcr_el1),
+        : .{ .memory = true });
+    asm volatile ("isb");
+    invalidateAll();
+}
+
+pub fn switchLowRoot(root_address: u64) void {
+    asm volatile ("dsb sy" ::: .{ .memory = true });
+    asm volatile ("msr TTBR0_EL1, %[value]"
+        :
+        : [value] "r" (root_address),
         : .{ .memory = true });
     asm volatile ("isb");
     invalidateAll();
@@ -416,6 +430,10 @@ test "table descriptors encode aligned next-level addresses" {
     try std.testing.expectEqual(
         @as(u64, 0x0000_0000_1234_5003),
         try tableDescriptor(0x0000_0000_1234_5000),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x0000_0000_1234_5003),
+        try tableDescriptor(0xffff_0000_1234_5000),
     );
     try std.testing.expectError(error.UnalignedAddress, tableDescriptor(0x1234_5001));
     try std.testing.expectError(error.AddressOutOfRange, tableDescriptor(0x0001_0000_0000_0000));

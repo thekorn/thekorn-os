@@ -15,6 +15,17 @@ pub fn build(b: *std.Build) void {
         .os_tag = .freestanding,
         .abi = .none,
     });
+    const user_one = addUserProgram(b, "user_one", kernel_target, optimize, 1);
+    const user_two = addUserProgram(b, "user_two", kernel_target, optimize, 2);
+    const generated_users = b.addWriteFiles();
+    _ = generated_users.addCopyFile(user_one.getEmittedBin(), "user_one.elf");
+    _ = generated_users.addCopyFile(user_two.getEmittedBin(), "user_two.elf");
+    const embedded_users = b.createModule(.{
+        .root_source_file = generated_users.add("embedded_users.zig",
+            \\pub const one align(8) = @embedFile("user_one.elf").*;
+            \\pub const two align(8) = @embedFile("user_two.elf").*;
+        ),
+    });
 
     const kernel = addKernel(
         b,
@@ -24,6 +35,7 @@ pub fn build(b: *std.Build) void {
         b.path("src/platform/qemu_virt/uart.zig"),
     );
     kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
+    kernel.root_module.addImport("embedded_users", embedded_users);
 
     const rpi_kernel = addKernel(
         b,
@@ -33,6 +45,7 @@ pub fn build(b: *std.Build) void {
         b.path("src/platform/rpi4/uart.zig"),
     );
     rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
+    rpi_kernel.root_module.addImport("embedded_users", embedded_users);
 
     const install_elf = b.addInstallArtifact(kernel, .{});
     const image = rpi_kernel.addObjCopy(.{
@@ -69,20 +82,22 @@ pub fn build(b: *std.Build) void {
     const smoke_step = b.step("smoke-virt", "Boot QEMU and verify the serial marker");
     smoke_step.dependOn(&smoke.step);
 
+    const native_test_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = b.graph.host,
+        .optimize = if (coverage) .Debug else optimize,
+        .imports = &.{.{
+            .name = "platform",
+            .module = b.createModule(.{
+                .root_source_file = b.path("src/platform/qemu_virt/uart.zig"),
+                .target = b.graph.host,
+                .optimize = if (coverage) .Debug else optimize,
+            }),
+        }},
+    });
+    native_test_module.addImport("embedded_users", embedded_users);
     const native_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = b.graph.host,
-            .optimize = if (coverage) .Debug else optimize,
-            .imports = &.{.{
-                .name = "platform",
-                .module = b.createModule(.{
-                    .root_source_file = b.path("src/platform/qemu_virt/uart.zig"),
-                    .target = b.graph.host,
-                    .optimize = if (coverage) .Debug else optimize,
-                }),
-            }},
-        }),
+        .root_module = native_test_module,
         .use_llvm = if (coverage) true else null,
         .test_runner = .{
             .path = b.path("src/test_runner.zig"),
@@ -151,6 +166,38 @@ pub fn build(b: *std.Build) void {
     });
 }
 
+fn addUserProgram(
+    b: *std.Build,
+    name: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    process_id: u8,
+) *std.Build.Step.Compile {
+    const options = b.addOptions();
+    options.addOption(u8, "process_id", process_id);
+    const root_module = b.createModule(.{
+        .root_source_file = b.path("src/user/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = true,
+        .unwind_tables = .none,
+        .pic = false,
+    });
+    root_module.addOptions("options", options);
+    root_module.addImport("syscall", b.createModule(.{
+        .root_source_file = b.path("src/kernel/syscall.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    const program = b.addExecutable(.{
+        .name = name,
+        .root_module = root_module,
+    });
+    program.entry = .{ .symbol_name = "_start" };
+    program.setLinkerScript(b.path("src/user/linker.ld"));
+    return program;
+}
+
 fn addKernel(
     b: *std.Build,
     name: []const u8,
@@ -182,7 +229,6 @@ fn addKernel(
     kernel.entry = .{ .symbol_name = "_start" };
     kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/boot.S"));
     kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/vectors.S"));
-    kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/user_fixture.S"));
     return kernel;
 }
 

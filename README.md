@@ -14,18 +14,20 @@ implementation plan](docs/plan.html) for the roadmap and current phase status.
 Both targets consume the firmware-provided device tree to discover RAM and
 reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
 The Phase 2 baseline is verified on a physical Pi 4 through the deliberate
-exception return and final `BOOT:OK` marker. The current Phase 5 image builds
-a sparse four-level identity map, enables the EL1 MMU and caches, then moves
-the kernel, stack, and exception vectors into a protected `TTBR1_EL1`
-high-half mapping. The low kernel alias is removed while device mappings remain
-available through `TTBR0_EL1`. QEMU verifies this transition and page-granular
-W^X permissions; the updated image still needs a physical-board rerun. QEMU
-then runs three tasks on separate kernel stacks, first with cooperative
-round-robin yields. For the preemptive gate, task 2 enters EL0 with fixed
-user text, data, stack, and bounded heap mappings while tasks 0 and 1 remain
-EL1 progress witnesses. The EL0 fixture uses the versioned project ABI for
-`write`, `yield`, `exit`, and memory growth and
-is preempted during the same 1,000-tick timer run.
+exception return and final `BOOT:OK` marker. The current image builds a sparse
+four-level identity map, enables the EL1 MMU and caches, then moves the kernel,
+stack, and exception vectors into a protected `TTBR1_EL1` high-half mapping.
+The low kernel alias is removed while device mappings remain available through
+the active `TTBR0_EL1` root. QEMU verifies this transition and page-granular
+W^X permissions; the updated image still needs a physical-board rerun.
+
+The Phase 8 QEMU gate runs three tasks on separate kernel stacks. After the
+cooperative round-robin checkpoint, task 0 remains an EL1 progress witness
+while tasks 1 and 2 become independently mapped Zig EL0 processes. Their
+embedded AArch64 ELF images use identical entry, data, heap, and stack virtual
+addresses backed by separate memory and `TTBR0_EL1` roots. Each process uses
+the versioned project ABI for `write`, `yield`, `exit`, and bounded memory
+growth and is preempted during the same 1,000-tick timer run.
 
 ## Requirements
 
@@ -122,13 +124,16 @@ synchronous vector, reports ESR/ELR/SPSR/FAR, and resumes after the trapped
 instruction. It disables FP/SIMD and proves an accidental floating-point
 instruction traps visibly. Three tasks then make bounded progress on separate
 16 KiB kernel stacks: first through 95 cooperative round-robin switches, then
-through exactly 1,000 allocation- and logging-free timer preemptions. During
-the preemptive gate, task 2 runs an assembly fixture at EL0. The fixture proves
-versioned syscall decoding, checked user pointers, cooperative user yield,
-on-demand growth within a four-page heap window, clean exit, and direct-access
-faults for UART and removed kernel mappings. Tasks 0 and 1 continue as EL1
-preemption witnesses. The checkpoint emits `USER:OK`, `SCHED:OK`, and
-`BOOT:OK` before QEMU is terminated by the smoke-test timeout.
+through exactly 1,000 timer preemptions. During the preemptive gate, two
+freestanding Zig executables are parsed as ELF64 images and loaded into
+independent address spaces. Both run from the same virtual addresses, retain
+private data and heap identities, preserve separate `SP_EL0` values across a
+yield, and receive timer preemption while task 0 continues at EL1. Each process
+proves versioned syscall decoding, checked user pointers, on-demand growth
+within a four-page heap window, clean exit, and direct-access faults for UART
+and removed kernel mappings. The checkpoint emits `PROCESS:ISOLATION_OK`,
+`USER:OK`, `SCHED:OK`, and `BOOT:OK` before QEMU is terminated by the
+smoke-test timeout.
 Before exception testing, it parses the QEMU DTB, reserves firmware, DTB, and
 kernel-owned memory, sweeps all allocatable frames, and emits `MEMORY:OK`.
 It then enables a protected identity map, installs the kernel's high-half
@@ -170,5 +175,7 @@ and Zig source locations.
   are enforced by the smoke gate
 - Phase 7: complete on QEMU — task 2 enters EL0, uses the versioned
   `write`/`yield`/`exit`/bounded-growth ABI, is timer-preempted, and cannot
-  directly access UART or kernel memory; independent process address spaces
-  remain Phase 8 work
+  directly access UART or kernel memory
+- Phase 8: complete on QEMU — two embedded Zig ELF processes run at identical
+  virtual addresses with independent backing, `TTBR0_EL1` roots, user stacks,
+  data, and bounded heaps; physical-board validation remains deferred

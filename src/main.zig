@@ -4,8 +4,11 @@ const uart = @import("platform");
 const exceptions = @import("arch/aarch64/exceptions.zig");
 const mmu = @import("arch/aarch64/mmu.zig");
 const timer = @import("arch/aarch64/timer.zig");
+const embedded_users = @import("embedded_users");
+const elf = @import("formats/elf.zig");
 const fdt = @import("formats/fdt.zig");
 const physical_memory = @import("kernel/physical_memory.zig");
+const process = @import("kernel/process.zig");
 const scheduler = @import("kernel/scheduler.zig");
 const syscall = @import("kernel/syscall.zig");
 const Console = @import("kernel/console.zig").Console;
@@ -15,17 +18,8 @@ const timer_tick_limit = 1_000;
 const cooperative_progress_limit = 32;
 const preemptive_progress_limit = 10_000;
 const user_tick_target = 100;
-const user_task_id = 2;
 const cooperative_phase: u8 = 0;
 const preemptive_phase: u8 = 1;
-const user_text_address: u64 = 0x0040_0000;
-const user_rodata_address: u64 = 0x0041_0000;
-const user_data_address: u64 = 0x0042_0000;
-const user_heap_address: u64 = 0x0043_0000;
-const user_stack_address: u64 = 0x0050_0000;
-const user_data_pages = 1;
-const user_stack_pages = 4;
-const user_heap_pages = 4;
 const max_user_write = 256;
 // EL1h with debug, SError, and FIQ masked. IRQ remains enabled.
 const scheduler_initial_spsr: u64 = 0x345;
@@ -50,18 +44,6 @@ const MmuProbe = enum {
     unmapped_write,
 };
 
-const UserFaultProbe = enum {
-    none,
-    uart,
-    kernel,
-};
-
-const UserMemory = extern struct {
-    data: [user_data_pages * mmu.page_size]u8,
-    stack: [user_stack_pages * mmu.page_size]u8,
-    heap: [user_heap_pages * mmu.page_size]u8,
-};
-
 var unexpected_interrupts: usize = 0;
 var frame_bitmap: [256 * 1024]u8 = undefined;
 var identity_map: mmu.IdentityMap = .{};
@@ -75,13 +57,7 @@ var scheduling_enabled = false;
 var scheduling_phase: u8 = cooperative_phase;
 var cooperative_progress: [scheduler.task_count]usize = @splat(0);
 var preemptive_progress: [scheduler.task_count]usize = @splat(0);
-var user_memory: UserMemory align(mmu.page_size) linksection(if (builtin.target.ofmt == .macho) "__DATA,__user_bss" else ".user.bss") = undefined;
-var user_started = false;
-var user_exited = false;
-var user_exit_status: u64 = 0;
-var user_heap_committed_pages: usize = 0;
-var user_preemptions: usize = 0;
-var expected_user_fault: UserFaultProbe = .none;
+var processes: [process.count]process.Process align(mmu.page_size) linksection(if (builtin.target.ofmt == .macho) "__DATA,__process_bss" else ".process.bss") = @splat(.{});
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
@@ -90,10 +66,6 @@ extern var __text_end: u8;
 extern var __rodata_start: u8;
 extern var __rodata_end: u8;
 extern var __data_start: u8;
-extern var __user_text_start: u8;
-extern var __user_text_end: u8;
-extern var __user_rodata_start: u8;
-extern var __user_rodata_end: u8;
 extern var __stack_top: u8;
 extern const __exception_vectors: u8;
 extern const __rodata_execute_probe: u32;
@@ -145,14 +117,18 @@ fn verifyFloatingPointTrap() void {
 fn runScheduler() noreturn {
     cooperative_progress = @splat(0);
     preemptive_progress = @splat(0);
-    @atomicStore(usize, userProgressPointer(), 0, .release);
-    @atomicStore(usize, userTicksPointer(), 0, .release);
-    user_started = false;
-    user_exited = false;
-    user_exit_status = 0;
-    user_heap_committed_pages = 0;
-    user_preemptions = 0;
-    expected_user_fault = .none;
+    for (&processes) |*item| {
+        @atomicStore(usize, item.progressPointer(), 0, .release);
+        @atomicStore(usize, item.ticksPointer(), 0, .release);
+        @atomicStore(usize, item.identityPointer(), 0, .release);
+        item.started = 0;
+        item.exited = 0;
+        item.exit_status = 0;
+        item.heap_pages_committed = 0;
+        item.preemptions = 0;
+        item.expected_fault = .none;
+        item.stack_pointer = process.stack_address + process.stack_pages * mmu.page_size;
+    }
     @atomicStore(u8, &scheduling_phase, cooperative_phase, .release);
     kernel_scheduler.init(
         highMappedAddress(@intFromPtr(&schedulerTask)),
@@ -160,6 +136,7 @@ fn runScheduler() noreturn {
     );
     uart.gic.init();
     scheduling_enabled = true;
+    KernelConsole.writeHex("USER:ABI_VERSION=", syscall.abi_version);
     KernelConsole.write("SCHED:START\n");
     asm volatile ("svc #0" ::: .{ .memory = true });
     schedulerFailed();
@@ -182,7 +159,7 @@ fn schedulerTask(task_id: usize) callconv(.c) noreturn {
         schedulerYield();
     }
 
-    if (task_id == user_task_id) enterUserMode();
+    if (task_id >= process.first_task) enterUserMode();
 
     var previous_ticks = timer.ticks();
     while (true) {
@@ -193,7 +170,10 @@ fn schedulerTask(task_id: usize) callconv(.c) noreturn {
         const current_ticks = timer.ticks();
         if (current_ticks < previous_ticks) schedulerFailed();
         previous_ticks = current_ticks;
-        if (current_ticks >= timer_tick_limit and preemptiveProgressComplete()) finishScheduler();
+        if (current_ticks >= timer_tick_limit) {
+            if (preemptiveProgressComplete()) finishScheduler();
+            schedulerFailed();
+        }
     }
 }
 
@@ -206,6 +186,46 @@ fn enterUserMode() noreturn {
     schedulerFailed();
 }
 
+fn currentProcessIndex() ?usize {
+    const task = kernel_scheduler.currentTask() orelse return null;
+    if (task < process.first_task or task >= process.first_task + process.count) return null;
+    return task - process.first_task;
+}
+
+fn currentProcess() ?*process.Process {
+    const index = currentProcessIndex() orelse return null;
+    return &processes[index];
+}
+
+fn dispatchTask(frame: *exceptions.Frame, reason: scheduler.Reason) *exceptions.Frame {
+    saveCurrentUserStack();
+    const next = kernel_scheduler.dispatch(frame, reason) catch schedulerFailed();
+    switchToCurrentTask();
+    return next;
+}
+
+fn blockCurrentTask(frame: *exceptions.Frame) *exceptions.Frame {
+    saveCurrentUserStack();
+    const next = kernel_scheduler.blockCurrent(frame) catch schedulerFailed();
+    switchToCurrentTask();
+    return next;
+}
+
+fn switchToCurrentTask() void {
+    if (currentProcess()) |item| {
+        mmu.switchLowRoot(item.root_physical);
+        exceptions.setUserStackPointer(item.stack_pointer);
+    } else {
+        mmu.switchLowRoot(physicalMappedAddress(identity_map.rootAddress()));
+    }
+}
+
+fn saveCurrentUserStack() void {
+    if (currentProcess()) |item| {
+        if (item.started != 0 and item.exited == 0) item.stack_pointer = exceptions.userStackPointer();
+    }
+}
+
 fn cooperativeProgressComplete() bool {
     for (&cooperative_progress) |*progress| {
         if (@atomicLoad(usize, progress, .acquire) < cooperative_progress_limit) return false;
@@ -214,11 +234,17 @@ fn cooperativeProgressComplete() bool {
 }
 
 fn preemptiveProgressComplete() bool {
-    for (0..user_task_id) |task| {
+    for (0..process.first_task) |task| {
         if (@atomicLoad(usize, &preemptive_progress[task], .acquire) < preemptive_progress_limit) return false;
     }
-    return user_exited and
-        @atomicLoad(usize, userProgressPointer(), .acquire) == preemptive_progress_limit;
+    for (&processes) |*item| {
+        if (item.exited == 0 or
+            @atomicLoad(usize, item.progressPointer(), .acquire) != preemptive_progress_limit)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 fn finishScheduler() noreturn {
@@ -229,48 +255,48 @@ fn finishScheduler() noreturn {
     {
         schedulerFailed();
     }
-    for (0..user_task_id) |task| {
+    for (0..process.first_task) |task| {
         if (@atomicLoad(usize, &preemptive_progress[task], .acquire) != preemptive_progress_limit or
             kernel_scheduler.preemptiveDispatches(task) == 0)
         {
             schedulerFailed();
         }
     }
-    if (!user_started or
-        !user_exited or
-        user_exit_status != 0 or
-        user_heap_committed_pages != 1 or
-        user_preemptions == 0 or
-        expected_user_fault != .none or
-        @atomicLoad(usize, userProgressPointer(), .acquire) != preemptive_progress_limit or
-        @atomicLoad(usize, userTicksPointer(), .acquire) < user_tick_target or
-        kernel_scheduler.preemptiveDispatches(user_task_id) == 0)
-    {
-        schedulerFailed();
+    for (&processes, 0..) |*item, index| {
+        const task = process.first_task + index;
+        if (item.started == 0 or
+            item.exited == 0 or
+            item.exit_status != 0 or
+            item.heap_pages_committed != 1 or
+            item.preemptions == 0 or
+            item.expected_fault != .none or
+            @atomicLoad(usize, item.progressPointer(), .acquire) != preemptive_progress_limit or
+            @atomicLoad(usize, item.ticksPointer(), .acquire) < user_tick_target or
+            @atomicLoad(usize, item.identityPointer(), .acquire) != index + 1 or
+            item.heapIdentityPointer().* != index + 1 or
+            kernel_scheduler.preemptiveDispatches(task) == 0)
+        {
+            schedulerFailed();
+        }
     }
 
     KernelConsole.writeHex("TIMER:TICKS=", timer.ticks());
     KernelConsole.write("TIMER:MONOTONIC\n");
     KernelConsole.write("IRQ:OK\n");
     KernelConsole.writeHex("SCHED:TASK0_PROGRESS=", preemptive_progress[0]);
-    KernelConsole.writeHex("SCHED:TASK1_PROGRESS=", preemptive_progress[1]);
-    KernelConsole.writeHex("SCHED:TASK2_PROGRESS=", @atomicLoad(usize, userProgressPointer(), .acquire));
-    KernelConsole.writeHex("USER:PREEMPTIONS=", user_preemptions);
+    KernelConsole.writeHex("SCHED:TASK1_PROGRESS=", @atomicLoad(usize, processes[0].progressPointer(), .acquire));
+    KernelConsole.writeHex("SCHED:TASK2_PROGRESS=", @atomicLoad(usize, processes[1].progressPointer(), .acquire));
+    KernelConsole.writeHex("PROCESS1:PREEMPTIONS=", processes[0].preemptions);
+    KernelConsole.writeHex("PROCESS2:PREEMPTIONS=", processes[1].preemptions);
     KernelConsole.writeHex("SCHED:PREEMPTIONS=", kernel_scheduler.preemptions());
     KernelConsole.write("SCHED:PREEMPTIVE_OK\n");
+    KernelConsole.write("PROCESS:ISOLATION_OK\n");
+    KernelConsole.write("ELF:OK\n");
     KernelConsole.write("USER:SYSCALLS_OK\n");
     KernelConsole.write("USER:OK\n");
     KernelConsole.write("SCHED:OK\n");
     KernelConsole.write("BOOT:OK\n");
     halt();
-}
-
-fn userProgressPointer() *usize {
-    return @ptrFromInt(user_data_address);
-}
-
-fn userTicksPointer() *usize {
-    return @ptrFromInt(user_data_address + @sizeOf(usize));
 }
 
 fn initializeMemory(dtb_address: usize) void {
@@ -307,50 +333,22 @@ fn initializeMmu() noreturn {
     const rodata_start: u64 = @intFromPtr(&__rodata_start);
     const rodata_end: u64 = @intFromPtr(&__rodata_end);
     const data_start: u64 = @intFromPtr(&__data_start);
-    const user_text_start: u64 = @intFromPtr(&__user_text_start);
-    const user_text_end: u64 = @intFromPtr(&__user_text_end);
-    const user_rodata_start: u64 = @intFromPtr(&__user_rodata_start);
-    const user_rodata_end: u64 = @intFromPtr(&__user_rodata_end);
-    const user_memory_start: u64 = @intFromPtr(&user_memory);
     const kernel_end: u64 = @intFromPtr(&__kernel_end);
-    if (user_text_end - user_text_start != mmu.page_size or
-        user_rodata_end - user_rodata_start != mmu.page_size)
-    {
-        mmuFailed();
+
+    processes[0].load(&embedded_users.one) catch mmuFailed();
+    processes[1].load(&embedded_users.two) catch mmuFailed();
+    for (&processes) |*item| {
+        for (uart.mmio_regions) |region| {
+            item.address_space.map(region.start, region.end, .device_read_write) catch mmuFailed();
+        }
     }
 
     identity_map.map(text_start, text_end, .normal_read_execute) catch mmuFailed();
-    identity_map.map(user_text_start, user_text_end, .normal_read_execute) catch mmuFailed();
-    identity_map.map(user_rodata_start, user_rodata_end, .normal_read_only) catch mmuFailed();
     identity_map.map(rodata_start, rodata_end, .normal_read_only) catch mmuFailed();
     identity_map.map(data_start, kernel_end, .normal_read_write) catch mmuFailed();
     for (uart.mmio_regions) |region| {
         identity_map.map(region.start, region.end, .device_read_write) catch mmuFailed();
     }
-    identity_map.mapAt(
-        user_text_address,
-        user_text_start,
-        user_text_end - user_text_start,
-        .user_read_execute,
-    ) catch mmuFailed();
-    identity_map.mapAt(
-        user_rodata_address,
-        user_rodata_start,
-        user_rodata_end - user_rodata_start,
-        .user_read_only,
-    ) catch mmuFailed();
-    identity_map.mapAt(
-        user_data_address,
-        user_memory_start + @offsetOf(UserMemory, "data"),
-        @sizeOf(@FieldType(UserMemory, "data")),
-        .user_read_write,
-    ) catch mmuFailed();
-    identity_map.mapAt(
-        user_stack_address,
-        user_memory_start + @offsetOf(UserMemory, "stack"),
-        @sizeOf(@FieldType(UserMemory, "stack")),
-        .user_read_write,
-    ) catch mmuFailed();
     mapHighHalf(text_start, text_end, .normal_read_execute);
     mapHighHalf(rodata_start, rodata_end, .normal_read_only);
     mapHighHalf(data_start, kernel_end, .normal_read_write);
@@ -404,14 +402,30 @@ fn kernelHighMain() callconv(.c) noreturn {
     for (uart.mmio_regions) |region| {
         if (identity_map.descriptor(region.start) == null) mmuFailed();
     }
-    if (identity_map.descriptor(user_text_address) == null or
-        identity_map.descriptor(user_data_address) == null or
-        identity_map.descriptor(user_stack_address) == null or
-        identity_map.descriptor(user_heap_address) != null)
+    if (identity_map.descriptor(process.image_address) != null or
+        processes[0].entry != process.image_address or
+        processes[1].entry != process.image_address or
+        processes[0].root_physical == processes[1].root_physical or
+        @intFromPtr(&processes[0].memory) == @intFromPtr(&processes[1].memory) or
+        processes[0].address_space.descriptor(process.image_address) == null or
+        processes[1].address_space.descriptor(process.image_address) == null or
+        processes[0].address_space.descriptor(process.data_address) == null or
+        processes[1].address_space.descriptor(process.data_address) == null or
+        processes[0].address_space.descriptor(process.data_address) ==
+            processes[1].address_space.descriptor(process.data_address) or
+        processes[0].address_space.descriptor(process.heap_address) != null or
+        processes[1].address_space.descriptor(process.heap_address) != null)
     {
         mmuFailed();
     }
 
+    KernelConsole.write("ELF:LOADED\n");
+    KernelConsole.writeHex("ELF:IMAGES=", process.count);
+    KernelConsole.writeHex("PROCESS:VIRTUAL_ENTRY=", process.image_address);
+    KernelConsole.writeHex("PROCESS:VIRTUAL_DATA=", process.data_address);
+    KernelConsole.write("PROCESS:DISTINCT_ROOTS\n");
+    KernelConsole.write("PROCESS:DISTINCT_BACKING\n");
+    KernelConsole.write("PROCESS:ADDRESS_SPACES_OK\n");
     KernelConsole.write("MMU:HIGH_HALF\n");
     verifyMmuProtection();
     KernelConsole.write("MMU:OK\n");
@@ -516,35 +530,35 @@ pub export fn exceptionHandler(
 fn handleKernelSupervisorCall(frame: *exceptions.Frame) *exceptions.Frame {
     const immediate = frame.esr & 0xffff;
     if (immediate == 0) {
-        return kernel_scheduler.dispatch(frame, .cooperative) catch schedulerFailed();
+        return dispatchTask(frame, .cooperative);
     }
+    const item = currentProcess() orelse schedulerFailed();
     if (immediate != 1 or
-        kernel_scheduler.currentTask() != user_task_id or
         @atomicLoad(u8, &scheduling_phase, .acquire) != preemptive_phase or
-        user_started)
+        item.started != 0)
     {
         schedulerFailed();
     }
 
-    exceptions.setUserStackPointer(user_stack_address + user_stack_pages * mmu.page_size);
+    exceptions.setUserStackPointer(item.stack_pointer);
     frame.registers = @splat(0);
-    frame.elr = user_text_address;
+    frame.elr = item.entry;
     frame.spsr = user_initial_spsr;
     frame.esr = 0;
     frame.far = 0;
-    user_started = true;
-    expected_user_fault = .uart;
-    KernelConsole.writeHex("USER:ABI_VERSION=", syscall.abi_version);
-    KernelConsole.write("USER:ENTER_EL0\n");
+    item.started = 1;
+    item.expected_fault = .uart;
+    KernelConsole.writeHex("PROCESS:ENTER_EL0=", currentProcessIndex().? + 1);
     return frame;
 }
 
 fn handleUserSyscall(frame: *exceptions.Frame) *exceptions.Frame {
-    if (kernel_scheduler.currentTask() != user_task_id or !user_started or user_exited) schedulerFailed();
+    const item = currentProcess() orelse schedulerFailed();
+    if (item.started == 0 or item.exited != 0) schedulerFailed();
     const number = if (frame.esr & 0xffff == 0) syscall.decode(frame.registers[8]) else null;
     const decoded = number orelse {
         frame.registers[0] = syscall.errorResult(.invalid_syscall);
-        KernelConsole.write("USER:BAD_SYSCALL_REJECTED\n");
+        KernelConsole.writeHex("PROCESS:BAD_SYSCALL_REJECTED=", currentProcessIndex().? + 1);
         return frame;
     };
     switch (decoded) {
@@ -555,9 +569,9 @@ fn handleUserSyscall(frame: *exceptions.Frame) *exceptions.Frame {
                 frame.registers[0] = 0;
                 return frame;
             }
-            if (length > max_user_write or !isUserReadable(address, length)) {
+            if (length > max_user_write or !isUserReadable(item, address, length)) {
                 frame.registers[0] = syscall.errorResult(.invalid_address);
-                KernelConsole.write("USER:BAD_POINTER_REJECTED\n");
+                KernelConsole.writeHex("PROCESS:BAD_POINTER_REJECTED=", currentProcessIndex().? + 1);
                 return frame;
             }
             const bytes: [*]const u8 = @ptrFromInt(address);
@@ -567,36 +581,38 @@ fn handleUserSyscall(frame: *exceptions.Frame) *exceptions.Frame {
         },
         .yield => {
             frame.registers[0] = 0;
-            KernelConsole.write("USER:YIELD\n");
-            return kernel_scheduler.dispatch(frame, .cooperative) catch schedulerFailed();
+            KernelConsole.writeHex("PROCESS:YIELD=", currentProcessIndex().? + 1);
+            return dispatchTask(frame, .cooperative);
         },
         .exit => {
-            user_exit_status = frame.registers[0];
-            user_exited = true;
-            KernelConsole.writeHex("USER:EXIT=", user_exit_status);
-            return kernel_scheduler.blockCurrent(frame) catch schedulerFailed();
+            item.exit_status = frame.registers[0];
+            item.exited = 1;
+            KernelConsole.writeHex("PROCESS:EXIT=", currentProcessIndex().? + 1);
+            return blockCurrentTask(frame);
         },
         .grow => {
             const requested_pages = frame.registers[0];
-            if (heapGrowthError(user_heap_committed_pages, requested_pages)) |growth_error| {
+            if (heapGrowthError(item.heap_pages_committed, requested_pages)) |growth_error| {
                 frame.registers[0] = syscall.errorResult(growth_error);
-                if (growth_error == .out_of_memory) KernelConsole.write("USER:HEAP_LIMIT_ENFORCED\n");
+                if (growth_error == .out_of_memory) {
+                    KernelConsole.writeHex("PROCESS:HEAP_LIMIT_ENFORCED=", currentProcessIndex().? + 1);
+                }
                 return frame;
             }
-            const previous_break = user_heap_address + user_heap_committed_pages * mmu.page_size;
-            const physical_heap = physicalMappedAddress(@intFromPtr(&user_memory)) +
-                @offsetOf(UserMemory, "heap") +
-                user_heap_committed_pages * mmu.page_size;
-            identity_map.mapAt(
+            const previous_break = process.heap_address + item.heap_pages_committed * mmu.page_size;
+            const physical_heap = physicalMappedAddress(@intFromPtr(&item.memory.heap)) +
+                item.heap_pages_committed * mmu.page_size;
+            item.address_space.mapAt(
                 previous_break,
                 physical_heap,
                 requested_pages * mmu.page_size,
                 .user_read_write,
             ) catch schedulerFailed();
-            user_heap_committed_pages += @intCast(requested_pages);
+            item.heap_pages_committed += @intCast(requested_pages);
             mmu.invalidateAll();
             frame.registers[0] = previous_break;
-            KernelConsole.writeHex("USER:HEAP_PAGES=", user_heap_committed_pages);
+            KernelConsole.writeHex("PROCESS:HEAP_PAGES=", item.heap_pages_committed);
+            KernelConsole.writeHex("PROCESS:GROW=", currentProcessIndex().? + 1);
             return frame;
         },
     }
@@ -604,26 +620,31 @@ fn handleUserSyscall(frame: *exceptions.Frame) *exceptions.Frame {
 
 fn heapGrowthError(committed_pages: usize, requested_pages: u64) ?syscall.ErrorCode {
     if (requested_pages == 0) return .invalid_argument;
-    if (committed_pages > user_heap_pages or requested_pages > user_heap_pages - committed_pages) {
+    if (committed_pages > process.heap_pages or requested_pages > process.heap_pages - committed_pages) {
         return .out_of_memory;
     }
     return null;
 }
 
-fn isUserReadable(address: u64, length: u64) bool {
+fn isUserReadable(item: *const process.Process, address: u64, length: u64) bool {
     if (length == 0) return true;
     if (address > std.math.maxInt(u64) - length) return false;
     const end = address + length;
-    return rangeContains(user_text_address, mmu.page_size, address, end) or
-        rangeContains(user_rodata_address, mmu.page_size, address, end) or
-        rangeContains(user_data_address, user_data_pages * mmu.page_size, address, end) or
-        rangeContains(user_stack_address, user_stack_pages * mmu.page_size, address, end) or
+    const allowed = rangeContains(process.image_address, process.image_size, address, end) or
+        rangeContains(process.data_address, process.data_pages * mmu.page_size, address, end) or
+        rangeContains(process.stack_address, process.stack_pages * mmu.page_size, address, end) or
         rangeContains(
-            user_heap_address,
-            user_heap_committed_pages * mmu.page_size,
+            process.heap_address,
+            item.heap_pages_committed * mmu.page_size,
             address,
             end,
         );
+    if (!allowed) return false;
+    var page = address & ~@as(u64, mmu.page_size - 1);
+    while (page < end) : (page += mmu.page_size) {
+        if (item.address_space.descriptor(page) == null) return false;
+    }
+    return true;
 }
 
 fn rangeContains(base: u64, size: u64, start: u64, end: u64) bool {
@@ -631,8 +652,9 @@ fn rangeContains(base: u64, size: u64, start: u64, end: u64) bool {
 }
 
 fn handleUserFault(vector: usize, frame: *exceptions.Frame) bool {
-    if (!user_started or
-        user_exited or
+    const item = currentProcess() orelse return false;
+    if (item.started == 0 or
+        item.exited != 0 or
         vector != 8 or
         exceptions.class(frame.esr) != data_abort_lower_el or
         frame.esr & write_not_read != 0)
@@ -641,12 +663,12 @@ fn handleUserFault(vector: usize, frame: *exceptions.Frame) bool {
     }
 
     const fault_status = frame.esr & fault_status_mask;
-    switch (expected_user_fault) {
+    switch (item.expected_fault) {
         .none => return false,
         .uart => {
             if (frame.far != 0x0900_0000 or fault_status != permission_fault_level_three) return false;
-            expected_user_fault = .kernel;
-            KernelConsole.write("USER:UART_DENIED\n");
+            item.expected_fault = .kernel;
+            KernelConsole.writeHex("PROCESS:UART_DENIED=", currentProcessIndex().? + 1);
         },
         .kernel => {
             if (frame.far != physicalMappedAddress(@intFromPtr(&__kernel_start)) or
@@ -655,8 +677,8 @@ fn handleUserFault(vector: usize, frame: *exceptions.Frame) bool {
             {
                 return false;
             }
-            expected_user_fault = .none;
-            KernelConsole.write("USER:KERNEL_DENIED\n");
+            item.expected_fault = .none;
+            KernelConsole.writeHex("PROCESS:KERNEL_DENIED=", currentProcessIndex().? + 1);
         },
     }
     frame.elr += 4;
@@ -727,13 +749,18 @@ fn handleIrq(vector: usize, frame: *exceptions.Frame) *exceptions.Frame {
     const interrupt_id = uart.gic.interruptId(acknowledgement);
     if (interrupt_id == uart.gic.physical_timer_interrupt) {
         timer.handleInterrupt();
-        if (vector == 9) user_preemptions += 1;
-        if (user_started and !user_exited) {
-            @atomicStore(usize, userTicksPointer(), timer.ticks(), .release);
+        if (vector == 9) {
+            const item = currentProcess() orelse schedulerFailed();
+            item.preemptions += 1;
+        }
+        for (&processes) |*item| {
+            if (item.started != 0 and item.exited == 0) {
+                @atomicStore(usize, item.ticksPointer(), timer.ticks(), .release);
+            }
         }
         uart.gic.end(acknowledgement);
         if (scheduling_enabled) {
-            return kernel_scheduler.dispatch(frame, .preemptive) catch schedulerFailed();
+            return dispatchTask(frame, .preemptive);
         }
     } else if (interrupt_id < uart.gic.first_special_interrupt) {
         _ = @atomicRmw(usize, &unexpected_interrupts, .Add, 1, .monotonic);
@@ -770,7 +797,9 @@ fn resetTestOutput() void {
 }
 
 test {
+    _ = elf;
     _ = mmu;
+    _ = process;
     _ = scheduler;
     _ = syscall;
 }
@@ -893,19 +922,106 @@ test "MMU probes classify permission and translation faults" {
 }
 
 test "user-readable ranges reject overflow and uncommitted heap pages" {
-    user_heap_committed_pages = 1;
-    defer user_heap_committed_pages = 0;
+    const item = &processes[0];
+    item.address_space = .{};
+    item.heap_pages_committed = 1;
+    defer {
+        item.address_space = .{};
+        item.heap_pages_committed = 0;
+    }
+    try item.address_space.mapAt(process.image_address, 0x1000, mmu.page_size, .user_read_execute);
+    try item.address_space.mapAt(process.heap_address, 0x2000, mmu.page_size, .user_read_write);
 
-    try std.testing.expect(isUserReadable(user_rodata_address, mmu.page_size));
-    try std.testing.expect(isUserReadable(user_heap_address, mmu.page_size));
-    try std.testing.expect(!isUserReadable(user_rodata_address + mmu.page_size - 1, 2));
-    try std.testing.expect(!isUserReadable(user_heap_address + mmu.page_size, 1));
-    try std.testing.expect(!isUserReadable(std.math.maxInt(u64), 2));
+    try std.testing.expect(isUserReadable(item, process.image_address, mmu.page_size));
+    try std.testing.expect(isUserReadable(item, process.heap_address, mmu.page_size));
+    try std.testing.expect(!isUserReadable(item, process.image_address + mmu.page_size - 1, 2));
+    try std.testing.expect(!isUserReadable(item, process.heap_address + mmu.page_size, 1));
+    try std.testing.expect(!isUserReadable(item, std.math.maxInt(u64), 2));
 }
 
 test "heap growth is nonzero and bounded by its fixed window" {
     try std.testing.expectEqual(syscall.ErrorCode.invalid_argument, heapGrowthError(0, 0).?);
-    try std.testing.expectEqual(null, heapGrowthError(0, user_heap_pages));
-    try std.testing.expectEqual(syscall.ErrorCode.out_of_memory, heapGrowthError(1, user_heap_pages).?);
-    try std.testing.expectEqual(syscall.ErrorCode.out_of_memory, heapGrowthError(user_heap_pages + 1, 1).?);
+    try std.testing.expectEqual(null, heapGrowthError(0, process.heap_pages));
+    try std.testing.expectEqual(syscall.ErrorCode.out_of_memory, heapGrowthError(1, process.heap_pages).?);
+    try std.testing.expectEqual(syscall.ErrorCode.out_of_memory, heapGrowthError(process.heap_pages + 1, 1).?);
+}
+
+test "embedded user programs are loadable AArch64 ELF images" {
+    for ([_][]const u8{ &embedded_users.one, &embedded_users.two }) |bytes| {
+        const image = try elf.parse(bytes);
+        try std.testing.expectEqual(process.image_address, image.entry);
+        try std.testing.expect(image.program_header_count >= 2);
+    }
+}
+
+test "embedded user programs load into independent address spaces" {
+    const first = &processes[0];
+    const second = &processes[1];
+    defer {
+        first.address_space = .{};
+        second.address_space = .{};
+    }
+
+    try first.load(&embedded_users.one);
+    try second.load(&embedded_users.two);
+
+    try std.testing.expectEqual(process.image_address, first.entry);
+    try std.testing.expectEqual(first.entry, second.entry);
+    try std.testing.expect(first.root_physical != second.root_physical);
+    try std.testing.expect(@intFromPtr(&first.memory) != @intFromPtr(&second.memory));
+    try std.testing.expect(
+        first.address_space.descriptor(process.data_address) !=
+            second.address_space.descriptor(process.data_address),
+    );
+}
+
+test "process loader rejects unsupported permissions, windows, and overlaps" {
+    const image = try elf.parse(&embedded_users.one);
+    const program_header = image.program_header_offset;
+    const first_segment = try image.segment(0);
+    try std.testing.expectEqual(elf.load_segment, first_segment.segment_type);
+    defer processes[0].address_space = .{};
+
+    var unsupported_permissions = embedded_users.one;
+    std.mem.writeInt(
+        u32,
+        unsupported_permissions[program_header + 4 ..][0..4],
+        elf.flag_read | elf.flag_write | elf.flag_execute,
+        .little,
+    );
+    try std.testing.expectError(
+        error.UnsupportedPermissions,
+        processes[0].load(&unsupported_permissions),
+    );
+
+    var outside_window = embedded_users.one;
+    std.mem.writeInt(
+        u64,
+        outside_window[program_header + 16 ..][0..8],
+        process.image_address - first_segment.alignment,
+        .little,
+    );
+    try std.testing.expectError(
+        error.SegmentOutsideWindow,
+        processes[0].load(&outside_window),
+    );
+
+    const second_program_header = program_header + image.program_header_size;
+    var overlapping_segments = embedded_users.one;
+    std.mem.writeInt(
+        u64,
+        overlapping_segments[second_program_header + 8 ..][0..8],
+        first_segment.file_offset,
+        .little,
+    );
+    std.mem.writeInt(
+        u64,
+        overlapping_segments[second_program_header + 16 ..][0..8],
+        first_segment.virtual_address,
+        .little,
+    );
+    try std.testing.expectError(
+        error.InvalidSegment,
+        processes[0].load(&overlapping_segments),
+    );
 }
