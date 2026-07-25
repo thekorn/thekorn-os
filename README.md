@@ -19,7 +19,9 @@ a sparse four-level identity map, enables the EL1 MMU and caches, then moves
 the kernel, stack, and exception vectors into a protected `TTBR1_EL1`
 high-half mapping. The low kernel alias is removed while device mappings remain
 available through `TTBR0_EL1`. QEMU verifies this transition and page-granular
-W^X permissions; the updated image still needs a physical-board rerun.
+W^X permissions; the updated image still needs a physical-board rerun. QEMU
+then runs three kernel threads on separate stacks, first with cooperative
+round-robin yields and then with 1,000 timer-driven preemptions.
 
 ## Requirements
 
@@ -113,10 +115,12 @@ run as suite setup and teardown hooks.
 
 The current QEMU checkpoint handles a deliberate `brk` through the EL1h
 synchronous vector, reports ESR/ELR/SPSR/FAR, and resumes after the trapped
-instruction. It then routes the generic physical timer through the GICv2,
-checks monotonic progress through exactly 1,000 allocation- and logging-free
-interrupts, and emits `IRQ:OK` followed by `BOOT:OK`. QEMU is terminated
-automatically by the smoke-test timeout.
+instruction. It disables FP/SIMD and proves an accidental floating-point
+instruction traps visibly. Three kernel threads then make bounded progress on
+separate 16 KiB stacks: first through 95 cooperative round-robin switches,
+then through exactly 1,000 allocation- and logging-free timer preemptions. The
+checkpoint emits `SCHED:OK` and `BOOT:OK` before QEMU is terminated by the
+smoke-test timeout.
 Before exception testing, it parses the QEMU DTB, reserves firmware, DTB, and
 kernel-owned memory, sweeps all allocatable frames, and emits `MEMORY:OK`.
 It then enables a protected identity map, installs the kernel's high-half
@@ -153,3 +157,6 @@ and Zig source locations.
 - Phase 5: in progress — the protected identity map, high-half `TTBR1_EL1`
   transition, low-alias removal, W^X fault probes, and QEMU gate are
   implemented; physical-board validation remains
+- Phase 6: complete on QEMU — three separate kernel stacks, cooperative yields,
+  exception-return context switching, FP/SIMD trapping, and timer preemption
+  are enforced by the smoke gate

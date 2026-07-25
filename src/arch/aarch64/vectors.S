@@ -78,6 +78,7 @@ __exception_vectors:
 
     mov x1, sp
     bl exceptionHandler
+    mov sp, x0
 
     ldp x2, x3, [sp, #248]
     msr ELR_EL1, x2
@@ -117,6 +118,14 @@ mmuProbeWrite:
     str xzr, [x0]
     ret
 .size mmuProbeWrite, . - mmuProbeWrite
+
+.global floatingPointProbe
+.type floatingPointProbe, %function
+floatingPointProbe:
+    // FMOV S0, S0. FP/SIMD is disabled, so this must trap before execution.
+    .inst 0x1e204000
+    ret
+.size floatingPointProbe, . - floatingPointProbe
 
 .section .rodata.mmu_probe, "a"
 .balign 4

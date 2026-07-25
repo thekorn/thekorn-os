@@ -6,10 +6,17 @@ const mmu = @import("arch/aarch64/mmu.zig");
 const timer = @import("arch/aarch64/timer.zig");
 const fdt = @import("formats/fdt.zig");
 const physical_memory = @import("kernel/physical_memory.zig");
+const scheduler = @import("kernel/scheduler.zig");
 const Console = @import("kernel/console.zig").Console;
 const KernelConsole = Console(uart.writeByte);
 
 const timer_tick_limit = 1_000;
+const cooperative_progress_limit = 32;
+const preemptive_progress_limit = 10_000;
+const cooperative_phase: u8 = 0;
+const preemptive_phase: u8 = 1;
+// EL1h with debug, SError, and FIQ masked. IRQ remains enabled.
+const scheduler_initial_spsr: u64 = 0x345;
 const max_dtb_size = 2 * 1024 * 1024;
 const instruction_abort_current_el = 0x21;
 const data_abort_current_el = 0x25;
@@ -34,6 +41,13 @@ var identity_map: mmu.IdentityMap = .{};
 var high_half_map: mmu.IdentityMap = .{};
 var expected_mmu_probe: MmuProbe = .none;
 var completed_mmu_probe: MmuProbe = .none;
+var floating_point_probe_expected = false;
+var floating_point_probe_completed = false;
+var kernel_scheduler: scheduler.Scheduler = .{};
+var scheduling_enabled = false;
+var scheduling_phase: u8 = cooperative_phase;
+var cooperative_progress: [scheduler.task_count]usize = @splat(0);
+var preemptive_progress: [scheduler.task_count]usize = @splat(0);
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
@@ -48,6 +62,7 @@ extern const __rodata_execute_probe: u32;
 extern var __data_execute_probe: u32;
 extern fn mmuProbeExecute(address: usize) callconv(.c) void;
 extern fn mmuProbeWrite(address: usize) callconv(.c) void;
+extern fn floatingPointProbe() callconv(.c) void;
 extern fn mmuEnterHighHalf(continuation: u64, vector_base: u64, stack_top: u64) callconv(.c) noreturn;
 
 pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c) noreturn {
@@ -72,30 +87,111 @@ fn continueBoot() noreturn {
     }
     KernelConsole.write("EXCEPTION:RETURNED\n");
 
+    if (builtin.cpu.arch == .aarch64) verifyFloatingPointTrap();
     if (builtin.cpu.arch == .aarch64 and uart.supports_timer_interrupts) {
-        uart.gic.init();
-        timer.init(timer_tick_limit);
-        enableInterrupts();
-
-        var previous_ticks: usize = 0;
-        while (timer.ticks() < timer_tick_limit) {
-            const current_ticks = timer.ticks();
-            if (current_ticks < previous_ticks) {
-                KernelConsole.write("TIMER:NON_MONOTONIC\n");
-                halt();
-            }
-            previous_ticks = current_ticks;
-        }
-        disableInterrupts();
-
-        if (unexpected_interrupts != 0 or timer.ticks() != timer_tick_limit) {
-            KernelConsole.write("IRQ:FAILED\n");
-            halt();
-        }
-        KernelConsole.writeHex("TIMER:TICKS=", timer.ticks());
-        KernelConsole.write("TIMER:MONOTONIC\n");
-        KernelConsole.write("IRQ:OK\n");
+        runScheduler();
     }
+    KernelConsole.write("BOOT:OK\n");
+    halt();
+}
+
+fn verifyFloatingPointTrap() void {
+    exceptions.disableFloatingPoint();
+    floating_point_probe_expected = true;
+    floating_point_probe_completed = false;
+    floatingPointProbe();
+    if (floating_point_probe_expected or !floating_point_probe_completed) schedulerFailed();
+    KernelConsole.write("FP:TRAP\n");
+}
+
+fn runScheduler() noreturn {
+    cooperative_progress = @splat(0);
+    preemptive_progress = @splat(0);
+    @atomicStore(u8, &scheduling_phase, cooperative_phase, .release);
+    kernel_scheduler.init(
+        highMappedAddress(@intFromPtr(&schedulerTask)),
+        scheduler_initial_spsr,
+    );
+    uart.gic.init();
+    scheduling_enabled = true;
+    KernelConsole.write("SCHED:START\n");
+    asm volatile ("svc #0" ::: .{ .memory = true });
+    schedulerFailed();
+}
+
+fn schedulerTask(task_id: usize) callconv(.c) noreturn {
+    if (task_id >= scheduler.task_count) schedulerFailed();
+
+    while (@atomicLoad(u8, &scheduling_phase, .acquire) == cooperative_phase) {
+        _ = @atomicRmw(usize, &cooperative_progress[task_id], .Add, 1, .acq_rel);
+        if (cooperativeProgressComplete()) {
+            const expected_switches = cooperative_progress_limit * scheduler.task_count - 1;
+            if (kernel_scheduler.cooperativeSwitches() != expected_switches) schedulerFailed();
+            KernelConsole.writeHex("SCHED:COOPERATIVE_SWITCHES=", expected_switches);
+            KernelConsole.write("SCHED:COOPERATIVE_OK\n");
+            @atomicStore(u8, &scheduling_phase, preemptive_phase, .release);
+            timer.init(timer_tick_limit);
+            break;
+        }
+        schedulerYield();
+    }
+
+    var previous_ticks = timer.ticks();
+    while (true) {
+        const progress = @atomicLoad(usize, &preemptive_progress[task_id], .acquire);
+        if (progress < preemptive_progress_limit) {
+            _ = @atomicRmw(usize, &preemptive_progress[task_id], .Add, 1, .acq_rel);
+        }
+        const current_ticks = timer.ticks();
+        if (current_ticks < previous_ticks) schedulerFailed();
+        previous_ticks = current_ticks;
+        if (current_ticks >= timer_tick_limit and preemptiveProgressComplete()) finishScheduler();
+    }
+}
+
+fn schedulerYield() void {
+    asm volatile ("svc #0" ::: .{ .memory = true });
+}
+
+fn cooperativeProgressComplete() bool {
+    for (&cooperative_progress) |*progress| {
+        if (@atomicLoad(usize, progress, .acquire) < cooperative_progress_limit) return false;
+    }
+    return true;
+}
+
+fn preemptiveProgressComplete() bool {
+    for (&preemptive_progress) |*progress| {
+        if (@atomicLoad(usize, progress, .acquire) < preemptive_progress_limit) return false;
+    }
+    return true;
+}
+
+fn finishScheduler() noreturn {
+    disableInterrupts();
+    if (unexpected_interrupts != 0 or
+        timer.ticks() != timer_tick_limit or
+        kernel_scheduler.preemptions() != timer_tick_limit)
+    {
+        schedulerFailed();
+    }
+    for (0..scheduler.task_count) |task| {
+        if (@atomicLoad(usize, &preemptive_progress[task], .acquire) != preemptive_progress_limit or
+            kernel_scheduler.preemptiveDispatches(task) == 0)
+        {
+            schedulerFailed();
+        }
+    }
+
+    KernelConsole.writeHex("TIMER:TICKS=", timer.ticks());
+    KernelConsole.write("TIMER:MONOTONIC\n");
+    KernelConsole.write("IRQ:OK\n");
+    KernelConsole.writeHex("SCHED:TASK0_PROGRESS=", preemptive_progress[0]);
+    KernelConsole.writeHex("SCHED:TASK1_PROGRESS=", preemptive_progress[1]);
+    KernelConsole.writeHex("SCHED:TASK2_PROGRESS=", preemptive_progress[2]);
+    KernelConsole.writeHex("SCHED:PREEMPTIONS=", kernel_scheduler.preemptions());
+    KernelConsole.write("SCHED:PREEMPTIVE_OK\n");
+    KernelConsole.write("SCHED:OK\n");
     KernelConsole.write("BOOT:OK\n");
     halt();
 }
@@ -255,12 +351,29 @@ fn mmuFailed() noreturn {
     halt();
 }
 
-pub export fn exceptionHandler(vector: usize, frame: *exceptions.Frame) callconv(.c) void {
+fn schedulerFailed() noreturn {
+    if (builtin.cpu.arch == .aarch64) disableInterrupts();
+    KernelConsole.write("SCHED:FAILED\n");
+    halt();
+}
+
+pub export fn exceptionHandler(
+    vector: usize,
+    frame: *exceptions.Frame,
+) callconv(.c) *exceptions.Frame {
     if (builtin.cpu.arch == .aarch64 and uart.supports_timer_interrupts and vector == 5) {
-        handleIrq();
-        return;
+        return handleIrq(frame);
     }
-    if (handleMmuProbe(vector, frame)) return;
+    if (handleMmuProbe(vector, frame)) return frame;
+    if (handleFloatingPointProbe(vector, frame)) return frame;
+    if (builtin.cpu.arch == .aarch64 and
+        uart.supports_timer_interrupts and
+        scheduling_enabled and
+        vector == 4 and
+        exceptions.class(frame.esr) == exceptions.supervisor_call_class)
+    {
+        return kernel_scheduler.dispatch(frame, .cooperative) catch schedulerFailed();
+    }
 
     KernelConsole.writeHex("EXCEPTION:VECTOR=", vector);
     KernelConsole.writeHex("EXCEPTION:ESR=", frame.esr);
@@ -272,11 +385,24 @@ pub export fn exceptionHandler(vector: usize, frame: *exceptions.Frame) callconv
     if (vector == 4 and exceptions.class(frame.esr) == exceptions.breakpoint_class) {
         KernelConsole.write("EXCEPTION:BRK\n");
         frame.elr += 4;
-        return;
+        return frame;
     }
 
     KernelConsole.write("EXCEPTION:UNHANDLED\n");
     halt();
+}
+
+fn handleFloatingPointProbe(vector: usize, frame: *exceptions.Frame) bool {
+    if (!floating_point_probe_expected or
+        vector != 4 or
+        exceptions.class(frame.esr) != exceptions.fp_access_trap_class)
+    {
+        return false;
+    }
+    frame.elr += 4;
+    floating_point_probe_expected = false;
+    floating_point_probe_completed = true;
+    return true;
 }
 
 fn handleMmuProbe(vector: usize, frame: *exceptions.Frame) bool {
@@ -325,20 +451,20 @@ fn matchesMmuProbe(probe: MmuProbe, esr: u64, far: u64, expected_address: usize)
     };
 }
 
-fn handleIrq() void {
+fn handleIrq(frame: *exceptions.Frame) *exceptions.Frame {
     const acknowledgement = uart.gic.acknowledge();
     const interrupt_id = uart.gic.interruptId(acknowledgement);
     if (interrupt_id == uart.gic.physical_timer_interrupt) {
         timer.handleInterrupt();
         uart.gic.end(acknowledgement);
+        if (scheduling_enabled) {
+            return kernel_scheduler.dispatch(frame, .preemptive) catch schedulerFailed();
+        }
     } else if (interrupt_id < uart.gic.first_special_interrupt) {
         _ = @atomicRmw(usize, &unexpected_interrupts, .Add, 1, .monotonic);
         uart.gic.end(acknowledgement);
     }
-}
-
-fn enableInterrupts() void {
-    asm volatile ("msr DAIFClr, #2" ::: .{ .memory = true });
+    return frame;
 }
 
 fn disableInterrupts() void {
@@ -370,6 +496,7 @@ fn resetTestOutput() void {
 
 test {
     _ = mmu;
+    _ = scheduler;
 }
 
 test "panic output uses the serial CRLF convention" {

@@ -260,7 +260,7 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: Phase 5 QEMU gate passed · hardware rerun pending</span>
+            <span class="meta">Status: Phase 6 complete in QEMU · hardware rerun pending</span>
             <span class="meta">Updated: 2026-07-25</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0 through 4 are complete and Phase 5 is in progress. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. The Phase 2 baseline has booted successfully on a physical Pi 4: it enters EL1h, reports boot facts over PL011, discovers memory from the firmware DTB, emits <code>MEMORY:OK</code>, handles and returns from the deliberate <code>brk</code>, and emits <code>BOOT:OK</code>. QEMU additionally verifies a protected four-level identity map, a high-half <code>TTBR1_EL1</code> transition with the PC, stack, and exception vectors moved high, removal of the low kernel alias, predictable W^X and unmapped-address faults, and 1,000 generic physical timer interrupts through its GICv2. The updated Phase 5 image still needs a physical-board rerun.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0 through 4 and the QEMU implementation of Phases 5 and 6 are complete. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. The Phase 2 baseline has booted successfully on a physical Pi 4: it enters EL1h, reports boot facts over PL011, discovers memory from the firmware DTB, emits <code>MEMORY:OK</code>, handles and returns from the deliberate <code>brk</code>, and emits <code>BOOT:OK</code>. QEMU additionally verifies a protected high-half kernel with its low alias removed, predictable W^X faults, explicit FP/SIMD trapping, and three kernel threads making bounded progress through cooperative and timer-driven round-robin switching. The updated Phase 5 image still needs a physical-board rerun.</p>
         </section>
 
         <section id="strategy">
@@ -393,7 +393,7 @@
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 6</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><h3>Kernel threads and preemptive round-robin scheduling</h3><p>Give each task a separate kernel stack and callee-saved AArch64 context. Prove cooperative <code>yield</code> first, then let the timer request rescheduling at a safe exception-return boundary. Compile without FP/SIMD and make accidental use trap visibly so integer-only task state is sufficient.</p><div class="tags"><span class="tag">context switch</span><span class="tag">run queue</span><span class="tag">preemption</span><span class="tag">integer state</span></div><div class="exit"><strong>Exit:</strong> three threads make bounded progress under voluntary and timer-driven switching; preemption is mandatory before EL0.</div></div>
+              <div class="milestone-body"><span class="status recommended">Complete · QEMU verified</span><h3>Kernel threads and preemptive round-robin scheduling</h3><p>Give each task a separate kernel stack and callee-saved AArch64 context. Prove cooperative <code>yield</code> first, then let the timer request rescheduling at a safe exception-return boundary. Compile without FP/SIMD and make accidental use trap visibly so integer-only task state is sufficient.</p><div class="tags"><span class="tag">context switch</span><span class="tag">run queue</span><span class="tag">preemption</span><span class="tag">integer state</span></div><div class="exit"><strong>Exit verified in QEMU:</strong> three threads on separate 16 KiB stacks each reach their bounded progress target after 95 voluntary switches and 1,000 timer-driven preemptions; an FP/SIMD instruction traps visibly before scheduling starts.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 7</div><div class="rail"><span class="dot"></span></div>

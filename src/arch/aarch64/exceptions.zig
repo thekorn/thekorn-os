@@ -1,6 +1,9 @@
 const std = @import("std");
 
 pub const breakpoint_class = 0x3c;
+pub const fp_access_trap_class = 0x07;
+pub const supervisor_call_class = 0x15;
+pub const stack_frame_size = 288;
 
 pub const Frame = extern struct {
     registers: [31]u64,
@@ -12,6 +15,17 @@ pub const Frame = extern struct {
 
 pub fn class(esr: u64) u64 {
     return (esr >> 26) & 0x3f;
+}
+
+pub fn disableFloatingPoint() void {
+    const cpacr_el1 = asm volatile ("mrs %[value], CPACR_EL1"
+        : [value] "=r" (-> u64),
+    );
+    asm volatile ("msr CPACR_EL1, %[value]"
+        :
+        : [value] "r" (cpacr_el1 & ~(@as(u64, 0b11) << 20)),
+        : .{ .memory = true });
+    asm volatile ("isb");
 }
 
 test "exception class is decoded from ESR bits 31 through 26" {
@@ -29,6 +43,8 @@ test "exception class ignores bits outside the class field" {
 
 test "exception frame layout matches the vector assembly" {
     try std.testing.expectEqual(280, @sizeOf(Frame));
+    try std.testing.expectEqual(0, stack_frame_size % 16);
+    try std.testing.expect(stack_frame_size >= @sizeOf(Frame));
     try std.testing.expectEqual(248, @offsetOf(Frame, "elr"));
     try std.testing.expectEqual(272, @offsetOf(Frame, "far"));
 }
