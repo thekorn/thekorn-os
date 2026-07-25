@@ -379,11 +379,11 @@
               <div class="phase-label">Phase 2</div><div class="rail"><span class="dot"></span></div>
               <div class="milestone-body"><span class="status recommended">Complete · hardware verified</span><h3>EL1 exceptions and the first Pi 4 checkpoint</h3><p>Detect the actual entry level, configure named EL2/EL3 control bits when needed, and enter EL1h. Install a 2 KiB-aligned, complete 16-slot vector table; save a full integer frame and decode ESR, ELR, SPSR, and FAR. The BCM2711 GPIO/PL011 backend and reproducible card image exercise the same path on a physical Pi.</p><div class="tags"><span class="tag">aarch64</span><span class="tag">vectors</span><span class="tag">Pi PL011</span><span class="tag">3.3 V serial</span></div><div class="exit"><strong>Exit verified:</strong> a deliberate <code>brk</code> reports the expected exception class and return address in QEMU and over a 3.3 V USB-to-TTL serial connection on Pi 4. Stop hardware work here until Phase 10.</div></div>
             </article>
-            <article class="milestone">
+            <article class="milestone foundation">
               <div class="phase-label">Phase 3</div><div class="rail"><span class="dot"></span></div>
               <div class="milestone-body"><span class="status recommended">Complete</span><h3>Generic timer and GIC interrupts</h3><p>Build a GICv2 implementation for QEMU <code>virt</code>, route the Arm generic physical timer, acknowledge/end interrupts correctly, and keep timer handlers allocation- and logging-free.</p><div class="tags"><span class="tag">GICv2</span><span class="tag">CNTP</span><span class="tag">IRQ</span></div><div class="exit"><strong>Exit verified:</strong> 1,000 ticks arrive with preserved registers, monotonic time, and no unhandled interrupt.</div></div>
             </article>
-            <article class="milestone">
+            <article class="milestone foundation">
               <div class="phase-label">Phase 4</div><div class="rail"><span class="dot"></span></div>
               <div class="milestone-body"><span class="status recommended">Complete</span><h3>DTB and physical frame allocation</h3><p>Parse flattened device tree RAM and reservations, reserve the kernel and DTB, and manage 4 KiB physical frames with a caller-backed bitmap. Bootstrap tables will be reserved when they exist.</p><div class="tags"><span class="tag">FDT</span><span class="tag">page bitmap</span><span class="tag">host tests</span></div><div class="exit"><strong>Exit verified:</strong> native allocator and parser tests pass, and the boot-time allocation sweep emits <code>MEMORY:OK</code> without returning a reserved frame in QEMU and on a physical Pi 4.</div></div>
             </article>
