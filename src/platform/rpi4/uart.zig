@@ -7,6 +7,9 @@ pub const supports_timer_interrupts = false;
 
 const gpio_base = 0xfe20_0000;
 const uart_base = 0xfe20_1000;
+pub const mmio_regions = [_]struct { start: u64, end: u64 }{
+    .{ .start = gpio_base, .end = uart_base + 0x1000 },
+};
 
 const gpio_function_select_1 = gpio_base + 0x04;
 const gpio_pull_control_0 = gpio_base + 0xe4;

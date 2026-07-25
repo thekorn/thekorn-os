@@ -34,6 +34,12 @@ fi
 previous_line=0
 for marker in \
   '^MEMORY:OK' \
+  '^MMU:ENABLED' \
+  '^MMU:TEXT_RO' \
+  '^MMU:RODATA_NX' \
+  '^MMU:DATA_NX' \
+  '^MMU:UNMAPPED' \
+  '^MMU:OK' \
   '^EXCEPTION:VECTOR=0x0000000000000004' \
   '^EXCEPTION:EC=0x000000000000003c' \
   '^EXCEPTION:BRK' \

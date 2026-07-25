@@ -16,6 +16,10 @@ pub const gic = @import("gic.zig");
 
 // QEMU VIRT_UART0: guest physical address 0x0900_0000, region size 0x1000.
 const base = 0x0900_0000;
+pub const mmio_regions = [_]struct { start: u64, end: u64 }{
+    .{ .start = 0x0800_0000, .end = 0x0802_0000 },
+    .{ .start = base, .end = base + 0x1000 },
+};
 
 // PL011 register addresses. Names in comments match the Arm manual.
 // UARTDR: data written here is placed in the transmit FIFO.

@@ -13,10 +13,11 @@ kernel also handles generic physical timer interrupts through a GICv2. See [the
 implementation plan](docs/plan.html) for the roadmap and current phase status.
 Both targets consume the firmware-provided device tree to discover RAM and
 reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
-The current image is verified on a physical Pi 4 through the deliberate
-exception return and final `BOOT:OK` marker.
-Phase 5 groundwork page-aligns the kernel's permission regions and provides
-host-tested AArch64 translation-descriptor encoding; the MMU remains disabled.
+The Phase 2 baseline is verified on a physical Pi 4 through the deliberate
+exception return and final `BOOT:OK` marker. The current Phase 5 image builds
+a sparse four-level identity map, enables the EL1 MMU and caches, and enforces
+page-granular W^X permissions. QEMU verifies this transition; the updated image
+still needs a physical-board rerun.
 
 ## Requirements
 
@@ -116,6 +117,10 @@ interrupts, and emits `IRQ:OK` followed by `BOOT:OK`. QEMU is terminated
 automatically by the smoke-test timeout.
 Before exception testing, it parses the QEMU DTB, reserves firmware, DTB, and
 kernel-owned memory, sweeps all allocatable frames, and emits `MEMORY:OK`.
+It then enables a protected identity map and emits `MMU:OK` after observing the
+expected faults for a text write, execution from rodata and data, and a write
+to an unmapped address. The console, exception path, and timer continue through
+the transition.
 
 ## Debug
 
@@ -141,6 +146,6 @@ and Zig source locations.
   monotonic tick accounting, and the 1,000-tick smoke-test gate
 - Phase 4: complete — DTB RAM/reservation discovery, 4 KiB bitmap frame
   allocation, host tests, and the QEMU allocation-sweep gate
-- Phase 5: in progress — page-granular linker boundaries and host-tested
-  translation descriptors are implemented; identity-map construction and MMU
-  activation remain
+- Phase 5: in progress — the protected identity map, W^X fault probes, MMU and
+  cache activation, and QEMU gate are implemented; the high-half `TTBR1_EL1`
+  transition remains

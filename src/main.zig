@@ -11,11 +11,39 @@ const KernelConsole = Console(uart.writeByte);
 
 const timer_tick_limit = 1_000;
 const max_dtb_size = 2 * 1024 * 1024;
+const instruction_abort_current_el = 0x21;
+const data_abort_current_el = 0x25;
+const write_not_read: u64 = 1 << 6;
+const fault_status_mask = 0x3f;
+const translation_fault_first = 0x04;
+const translation_fault_last = 0x07;
+const permission_fault_level_three = 0x0f;
+
+const MmuProbe = enum {
+    none,
+    text_write,
+    rodata_execute,
+    data_execute,
+    unmapped_write,
+};
+
 var unexpected_interrupts: usize = 0;
 var frame_bitmap: [256 * 1024]u8 = undefined;
+var identity_map: mmu.IdentityMap = .{};
+var expected_mmu_probe: MmuProbe = .none;
+var completed_mmu_probe: MmuProbe = .none;
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
+extern var __text_start: u8;
+extern var __text_end: u8;
+extern var __rodata_start: u8;
+extern var __rodata_end: u8;
+extern var __data_start: u8;
+extern const __rodata_execute_probe: u32;
+extern var __data_execute_probe: u32;
+extern fn mmuProbeExecute(address: usize) callconv(.c) void;
+extern fn mmuProbeWrite(address: usize) callconv(.c) void;
 
 pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c) noreturn {
     uart.init();
@@ -27,6 +55,7 @@ pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c)
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_end),
     );
     initializeMemory(dtb);
+    if (builtin.cpu.arch == .aarch64) initializeMmu();
     if (builtin.cpu.arch == .aarch64) {
         asm volatile ("brk #0");
     } else {
@@ -90,8 +119,66 @@ fn initializeMemory(dtb_address: usize) void {
     KernelConsole.write("MEMORY:OK\n");
 }
 
+fn initializeMmu() void {
+    identity_map.map(
+        @intFromPtr(&__text_start),
+        @intFromPtr(&__text_end),
+        .normal_read_execute,
+    ) catch mmuFailed();
+    identity_map.map(
+        @intFromPtr(&__rodata_start),
+        @intFromPtr(&__rodata_end),
+        .normal_read_only,
+    ) catch mmuFailed();
+    identity_map.map(
+        @intFromPtr(&__data_start),
+        @intFromPtr(&__kernel_end),
+        .normal_read_write,
+    ) catch mmuFailed();
+    for (uart.mmio_regions) |region| {
+        identity_map.map(region.start, region.end, .device_read_write) catch mmuFailed();
+    }
+    mmu.enable(identity_map.rootAddress());
+    if (!mmu.isEnabled()) mmuFailed();
+    KernelConsole.write("MMU:ENABLED\n");
+    verifyMmuProtection();
+    KernelConsole.write("MMU:OK\n");
+}
+
+fn verifyMmuProtection() void {
+    expected_mmu_probe = .text_write;
+    mmuProbeWrite(@intFromPtr(&__text_start));
+    finishMmuProbe(.text_write);
+    KernelConsole.write("MMU:TEXT_RO\n");
+
+    expected_mmu_probe = .rodata_execute;
+    mmuProbeExecute(@intFromPtr(&__rodata_execute_probe));
+    finishMmuProbe(.rodata_execute);
+    KernelConsole.write("MMU:RODATA_NX\n");
+
+    expected_mmu_probe = .data_execute;
+    mmuProbeExecute(@intFromPtr(&__data_execute_probe));
+    finishMmuProbe(.data_execute);
+    KernelConsole.write("MMU:DATA_NX\n");
+
+    expected_mmu_probe = .unmapped_write;
+    mmuProbeWrite(0);
+    finishMmuProbe(.unmapped_write);
+    KernelConsole.write("MMU:UNMAPPED\n");
+}
+
+fn finishMmuProbe(probe: MmuProbe) void {
+    if (expected_mmu_probe != .none or completed_mmu_probe != probe) mmuFailed();
+    completed_mmu_probe = .none;
+}
+
 fn memoryFailed() noreturn {
     KernelConsole.write("MEMORY:FAILED\n");
+    halt();
+}
+
+fn mmuFailed() noreturn {
+    KernelConsole.write("MMU:FAILED\n");
     halt();
 }
 
@@ -100,6 +187,7 @@ pub export fn exceptionHandler(vector: usize, frame: *exceptions.Frame) callconv
         handleIrq();
         return;
     }
+    if (handleMmuProbe(vector, frame)) return;
 
     KernelConsole.writeHex("EXCEPTION:VECTOR=", vector);
     KernelConsole.writeHex("EXCEPTION:ESR=", frame.esr);
@@ -116,6 +204,47 @@ pub export fn exceptionHandler(vector: usize, frame: *exceptions.Frame) callconv
 
     KernelConsole.write("EXCEPTION:UNHANDLED\n");
     halt();
+}
+
+fn handleMmuProbe(vector: usize, frame: *exceptions.Frame) bool {
+    const probe = expected_mmu_probe;
+    if (probe == .none or vector != 4) return false;
+
+    const expected_address: usize = switch (probe) {
+        .none => unreachable,
+        .text_write => @intFromPtr(&__text_start),
+        .rodata_execute => @intFromPtr(&__rodata_execute_probe),
+        .data_execute => @intFromPtr(&__data_execute_probe),
+        .unmapped_write => 0,
+    };
+    if (!matchesMmuProbe(probe, frame.esr, frame.far, expected_address)) return false;
+
+    switch (probe) {
+        .none => unreachable,
+        .text_write, .unmapped_write => frame.elr += 4,
+        .rodata_execute, .data_execute => frame.elr = frame.registers[1],
+    }
+    expected_mmu_probe = .none;
+    completed_mmu_probe = probe;
+    return true;
+}
+
+fn matchesMmuProbe(probe: MmuProbe, esr: u64, far: u64, expected_address: usize) bool {
+    if (far != expected_address) return false;
+    const exception_class = exceptions.class(esr);
+    const fault_status = esr & fault_status_mask;
+    return switch (probe) {
+        .none => false,
+        .text_write => exception_class == data_abort_current_el and
+            esr & write_not_read != 0 and
+            fault_status == permission_fault_level_three,
+        .rodata_execute, .data_execute => exception_class == instruction_abort_current_el and
+            fault_status == permission_fault_level_three,
+        .unmapped_write => exception_class == data_abort_current_el and
+            esr & write_not_read != 0 and
+            fault_status >= translation_fault_first and
+            fault_status <= translation_fault_last,
+    };
 }
 
 fn handleIrq() void {
@@ -246,4 +375,32 @@ test "GIC acknowledgement decoding preserves interrupt ID boundaries" {
         uart.gic.interruptId(uart.gic.first_special_interrupt),
     );
     try std.testing.expectEqual(@as(u32, 0x3ff), uart.gic.interruptId(std.math.maxInt(u32)));
+}
+
+test "MMU probes classify permission and translation faults" {
+    const address = 0x4008_0000;
+    try std.testing.expect(matchesMmuProbe(
+        .text_write,
+        (@as(u64, data_abort_current_el) << 26) | write_not_read | permission_fault_level_three,
+        address,
+        address,
+    ));
+    try std.testing.expect(matchesMmuProbe(
+        .rodata_execute,
+        (@as(u64, instruction_abort_current_el) << 26) | permission_fault_level_three,
+        address,
+        address,
+    ));
+    try std.testing.expect(matchesMmuProbe(
+        .unmapped_write,
+        (@as(u64, data_abort_current_el) << 26) | write_not_read | translation_fault_last,
+        0,
+        0,
+    ));
+    try std.testing.expect(!matchesMmuProbe(
+        .data_execute,
+        (@as(u64, data_abort_current_el) << 26) | write_not_read | permission_fault_level_three,
+        address,
+        address,
+    ));
 }

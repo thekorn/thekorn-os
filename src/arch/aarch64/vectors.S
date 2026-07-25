@@ -100,3 +100,36 @@ __exception_vectors:
     ldp x0, x1, [sp, #0]
     add sp, sp, #288
     eret
+
+.section .text.mmu_probe, "ax"
+.global mmuProbeExecute
+.type mmuProbeExecute, %function
+mmuProbeExecute:
+    adr x1, .Lmmu_probe_return
+    br x0
+.Lmmu_probe_return:
+    ret
+.size mmuProbeExecute, . - mmuProbeExecute
+
+.global mmuProbeWrite
+.type mmuProbeWrite, %function
+mmuProbeWrite:
+    str xzr, [x0]
+    ret
+.size mmuProbeWrite, . - mmuProbeWrite
+
+.section .rodata.mmu_probe, "a"
+.balign 4
+.global __rodata_execute_probe
+.type __rodata_execute_probe, %object
+__rodata_execute_probe:
+    .word 0xd65f03c0
+.size __rodata_execute_probe, . - __rodata_execute_probe
+
+.section .data.mmu_probe, "aw"
+.balign 4
+.global __data_execute_probe
+.type __data_execute_probe, %object
+__data_execute_probe:
+    .word 0xd65f03c0
+.size __data_execute_probe, . - __data_execute_probe
