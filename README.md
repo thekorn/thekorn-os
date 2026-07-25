@@ -13,6 +13,8 @@ kernel also handles generic physical timer interrupts through a GICv2. See [the
 implementation plan](docs/plan.html) for the roadmap and current phase status.
 Both targets consume the firmware-provided device tree to discover RAM and
 reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
+The current image is verified on a physical Pi 4 through the deliberate
+exception return and final `BOOT:OK` marker.
 Phase 5 groundwork page-aligns the kernel's permission regions and provides
 host-tested AArch64 translation-descriptor encoding; the MMU remains disabled.
 
@@ -133,8 +135,8 @@ and Zig source locations.
   raw image, QEMU run/debug steps
 - Phase 1: complete — QEMU PL011 serial output, boot facts, panic marker, and
   automated smoke test
-- Phase 2: in progress — QEMU EL1 exception handling and the Raspberry Pi 4
-  GPIO/PL011 image are implemented; physical-board verification remains
+- Phase 2: complete — EL1 exception handling and the Raspberry Pi 4 GPIO/PL011
+  image are verified on physical hardware
 - Phase 3: complete — QEMU GICv2 routing, generic physical timer interrupts,
   monotonic tick accounting, and the 1,000-tick smoke-test gate
 - Phase 4: complete — DTB RAM/reservation discovery, 4 KiB bitmap frame
