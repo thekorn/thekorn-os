@@ -232,8 +232,12 @@ The existing headless `run-virt` and `smoke-virt` profiles remain unchanged.
   serial outcome markers, and opt-in QEMU virtio-gpu run profile are
   host-testable; device initialization and all physical-hardware evidence are
   deferred to later graphics gates
+- Graphics G1: complete — the allocation-free software renderer clips pixels,
+  rectangles, integer lines, and fixed 8 × 8 glyphs; tests cover padded pitch,
+  empty and malformed surfaces, edge clipping, channel order, and the complete
+  scene's deterministic hash
 
-Graphics G1 is the active milestone. The focused
+Graphics G2 is the active milestone. The focused
 [first graphical output plan](docs/graphics-plan.html) tracks the work toward a
 shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
 framebuffer parity while keeping serial diagnostics authoritative. Physical
