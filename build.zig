@@ -17,13 +17,21 @@ pub fn build(b: *std.Build) void {
     });
     const user_one = addUserProgram(b, "user_one", kernel_target, optimize, 1);
     const user_two = addUserProgram(b, "user_two", kernel_target, optimize, 2);
+    const user_storage = b.addSystemCommand(&.{"python3"});
+    user_storage.addFileArg(b.path("scripts/make-user-storage.py"));
+    user_storage.addFileArg(user_one.getEmittedBin());
+    user_storage.addFileArg(user_two.getEmittedBin());
+    const initramfs = user_storage.addOutputFileArg("initramfs.cpio");
+    const user_disk = user_storage.addOutputFileArg("users-fat16.img");
     const generated_users = b.addWriteFiles();
     _ = generated_users.addCopyFile(user_one.getEmittedBin(), "user_one.elf");
     _ = generated_users.addCopyFile(user_two.getEmittedBin(), "user_two.elf");
+    _ = generated_users.addCopyFile(initramfs, "initramfs.cpio");
     const embedded_users = b.createModule(.{
         .root_source_file = generated_users.add("embedded_users.zig",
             \\pub const one align(8) = @embedFile("user_one.elf").*;
             \\pub const two align(8) = @embedFile("user_two.elf").*;
+            \\pub const initramfs align(8) = @embedFile("initramfs.cpio").*;
         ),
     });
 
@@ -53,6 +61,7 @@ pub fn build(b: *std.Build) void {
         .format = .binary,
     });
     const install_image = b.addInstallFile(image.getOutput(), "kernel8.img");
+    const install_user_disk = b.addInstallFile(user_disk, "users-fat16.img");
     const rpi_disk = b.addSystemCommand(&.{"bash"});
     rpi_disk.addFileArg(b.path("scripts/make-rpi4-image.sh"));
     rpi_disk.addFileArg(image.getOutput());
@@ -69,16 +78,18 @@ pub fn build(b: *std.Build) void {
     const install_rpi_disk = b.addInstallFile(rpi_disk_output, "thekorn-os-rpi4.img");
     b.getInstallStep().dependOn(&install_elf.step);
     b.getInstallStep().dependOn(&install_image.step);
+    b.getInstallStep().dependOn(&install_user_disk.step);
     b.getInstallStep().dependOn(&install_rpi_disk.step);
 
     const qemu_image = kernel.addObjCopy(.{ .format = .binary });
-    addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", qemu_image.getOutput(), false, false);
-    addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", qemu_image.getOutput(), false, true);
-    addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", qemu_image.getOutput(), true, false);
+    addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", qemu_image.getOutput(), user_disk, false, false);
+    addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", qemu_image.getOutput(), user_disk, false, true);
+    addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", qemu_image.getOutput(), user_disk, true, false);
 
     const smoke = b.addSystemCommand(&.{"bash"});
     smoke.addFileArg(b.path("scripts/smoke-virt.sh"));
     smoke.addFileArg(qemu_image.getOutput());
+    smoke.addFileArg(user_disk);
     const smoke_step = b.step("smoke-virt", "Boot QEMU and verify the serial marker");
     smoke_step.dependOn(&smoke.step);
 
@@ -237,28 +248,22 @@ fn addQemuStep(
     name: []const u8,
     description: []const u8,
     kernel: std.Build.LazyPath,
+    user_disk: std.Build.LazyPath,
     debug: bool,
     gui: bool,
 ) void {
-    const qemu = b.addSystemCommand(&.{
-        "qemu-system-aarch64",
-        "-machine",
-        "virt",
-        "-cpu",
-        "cortex-a72",
-        "-smp",
-        "1",
-        "-m",
-        "128M",
-    });
-    if (gui) {
-        qemu.addArgs(&.{ "-monitor", "none", "-serial", "vc:2048x1536" });
-    } else {
-        qemu.addArg("-nographic");
-    }
-    qemu.addArg("-kernel");
+    const qemu = b.addSystemCommand(&.{ "bash", "-c" });
+    const command = if (gui)
+        \\exec qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 1 -m 128M -monitor none -serial vc:2048x1536 -global virtio-mmio.force-legacy=false -kernel "$1" -drive "file=$2,format=raw,if=none,readonly=on,id=users" -device virtio-blk-device,drive=users
+    else if (debug)
+        \\exec qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 1 -m 128M -nographic -global virtio-mmio.force-legacy=false -kernel "$1" -drive "file=$2,format=raw,if=none,readonly=on,id=users" -device virtio-blk-device,drive=users -S -s
+    else
+        \\exec qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 1 -m 128M -nographic -global virtio-mmio.force-legacy=false -kernel "$1" -drive "file=$2,format=raw,if=none,readonly=on,id=users" -device virtio-blk-device,drive=users
+    ;
+    qemu.addArg(command);
+    qemu.addArg(name);
     qemu.addFileArg(kernel);
-    if (debug) qemu.addArgs(&.{ "-S", "-s" });
+    qemu.addFileArg(user_disk);
 
     const step = b.step(name, description);
     step.dependOn(&qemu.step);

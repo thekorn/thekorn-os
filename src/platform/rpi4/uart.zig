@@ -4,6 +4,7 @@
 //! UART0's input clock at 48 MHz, so divisors 26 + 3/64 select 115200 baud.
 
 pub const supports_timer_interrupts = false;
+pub const supports_block_device = false;
 
 const gpio_base = 0xfe20_0000;
 const uart_base = 0xfe20_1000;

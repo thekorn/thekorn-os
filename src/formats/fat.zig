@@ -1,0 +1,334 @@
+const std = @import("std");
+const block = @import("../kernel/block_device.zig");
+
+pub const Error = block.Error || error{
+    InvalidBpb,
+    UnsupportedFat12,
+    InvalidName,
+    NotFound,
+    BufferTooSmall,
+    CorruptChain,
+    BadCluster,
+    ReservedCluster,
+    ClusterOutOfRange,
+    ChainLoop,
+    TruncatedChain,
+    Overflow,
+};
+
+pub const FatType = enum { fat16, fat32 };
+
+pub const FileSystem = struct {
+    device: block.BlockDevice,
+    fat_type: FatType,
+    sectors_per_cluster: u8,
+    fat_start: u64,
+    data_start: u64,
+    root_start: u64,
+    root_sectors: u32,
+    root_cluster: u32,
+    cluster_count: u32,
+
+    pub fn mount(device: block.BlockDevice) Error!FileSystem {
+        if (device.block_size != 512) return error.InvalidBpb;
+        var sector: [512]u8 = undefined;
+        try device.read(0, &sector);
+        if (sector[510] != 0x55 or sector[511] != 0xaa) return error.InvalidBpb;
+        const bytes_per_sector = le16(sector[11..13]);
+        const sectors_per_cluster = sector[13];
+        const reserved = le16(sector[14..16]);
+        const fats = sector[16];
+        const root_entries = le16(sector[17..19]);
+        const total16 = le16(sector[19..21]);
+        const fat16_size = le16(sector[22..24]);
+        const total32 = le32(sector[32..36]);
+        const fat32_size = le32(sector[36..40]);
+        if (bytes_per_sector != 512 or sectors_per_cluster == 0 or !std.math.isPowerOfTwo(sectors_per_cluster) or reserved == 0 or fats == 0) return error.InvalidBpb;
+
+        const total: u64 = if (total16 != 0) total16 else total32;
+        const fat_size: u64 = if (fat16_size != 0) fat16_size else fat32_size;
+        if (total == 0 or fat_size == 0 or total > device.block_count) return error.InvalidBpb;
+        const root_bytes = std.math.mul(u64, root_entries, 32) catch return error.Overflow;
+        const root_sectors: u64 = (root_bytes + 511) / 512;
+        const fats_sectors = std.math.mul(u64, fats, fat_size) catch return error.Overflow;
+        const fat_start: u64 = reserved;
+        const root_start = std.math.add(u64, fat_start, fats_sectors) catch return error.Overflow;
+        const data_start = std.math.add(u64, root_start, root_sectors) catch return error.Overflow;
+        if (data_start >= total) return error.InvalidBpb;
+        const clusters64 = (total - data_start) / sectors_per_cluster;
+        if (clusters64 < 4085) return error.UnsupportedFat12;
+        if (clusters64 > std.math.maxInt(u32) - 2) return error.InvalidBpb;
+        const fat_type: FatType = if (clusters64 < 65525) .fat16 else .fat32;
+        if (fat_type == .fat16 and (root_entries == 0 or fat16_size == 0)) return error.InvalidBpb;
+        if (fat_type == .fat32 and (root_entries != 0 or fat16_size != 0 or fat32_size == 0)) return error.InvalidBpb;
+        const root_cluster = if (fat_type == .fat32) le32(sector[44..48]) & 0x0fffffff else 0;
+        if (fat_type == .fat32 and (root_cluster < 2 or root_cluster >= clusters64 + 2)) return error.InvalidBpb;
+
+        // The FAT must contain an entry for every data cluster.
+        const entry_size: u64 = if (fat_type == .fat16) 2 else 4;
+        if (fat_size * 512 / entry_size < clusters64 + 2) return error.InvalidBpb;
+        return .{
+            .device = device,
+            .fat_type = fat_type,
+            .sectors_per_cluster = sectors_per_cluster,
+            .fat_start = fat_start,
+            .data_start = data_start,
+            .root_start = root_start,
+            .root_sectors = @intCast(root_sectors),
+            .root_cluster = root_cluster,
+            .cluster_count = @intCast(clusters64),
+        };
+    }
+
+    pub fn readFile(self: FileSystem, name: []const u8, destination: []u8) Error![]u8 {
+        var short: [11]u8 = undefined;
+        try shortName(name, &short);
+        const entry = try self.findEntry(&short);
+        const size: usize = entry.size;
+        if (destination.len < size) return error.BufferTooSmall;
+        if (size == 0) return destination[0..0];
+        if (entry.cluster < 2) return error.CorruptChain;
+
+        var cluster = entry.cluster;
+        var copied: usize = 0;
+        var visited: u32 = 0;
+        var sector: [512]u8 = undefined;
+        while (copied < size) {
+            try self.validateCluster(cluster);
+            if (visited >= self.cluster_count) return error.ChainLoop;
+            visited += 1;
+            const first = try self.clusterSector(cluster);
+            for (0..self.sectors_per_cluster) |within| {
+                try self.device.read(first + within, &sector);
+                const amount = @min(size - copied, sector.len);
+                @memcpy(destination[copied .. copied + amount], sector[0..amount]);
+                copied += amount;
+                if (copied == size) return destination[0..size];
+            }
+            const next = self.nextCluster(cluster) catch |err| switch (err) {
+                error.TruncatedChain => return error.TruncatedChain,
+                else => return err,
+            };
+            if (next == cluster) return error.ChainLoop;
+            cluster = next;
+        }
+        unreachable;
+    }
+
+    const Entry = struct { cluster: u32, size: u32 };
+
+    fn findEntry(self: FileSystem, wanted: *const [11]u8) Error!Entry {
+        if (self.fat_type == .fat16) {
+            var sector: [512]u8 = undefined;
+            for (0..self.root_sectors) |i| {
+                try self.device.read(self.root_start + i, &sector);
+                if (scanSector(&sector, wanted)) |result| return result.entry orelse return error.NotFound;
+            }
+            return error.NotFound;
+        }
+        var cluster = self.root_cluster;
+        var visited: u32 = 0;
+        var sector: [512]u8 = undefined;
+        while (true) {
+            try self.validateCluster(cluster);
+            if (visited >= self.cluster_count) return error.ChainLoop;
+            visited += 1;
+            const first = try self.clusterSector(cluster);
+            for (0..self.sectors_per_cluster) |i| {
+                try self.device.read(first + i, &sector);
+                if (scanSector(&sector, wanted)) |result| return result.entry orelse return error.NotFound;
+            }
+            cluster = self.nextCluster(cluster) catch |err| switch (err) {
+                error.TruncatedChain => return error.NotFound,
+                else => return err,
+            };
+        }
+    }
+
+    const ScanResult = struct { entry: ?Entry };
+
+    fn scanSector(sector: *const [512]u8, wanted: *const [11]u8) ?ScanResult {
+        for (0..16) |index| {
+            const item = sector[index * 32 ..][0..32];
+            if (item[0] == 0) return .{ .entry = null };
+            const attributes = item[11];
+            if (item[0] == 0xe5 or attributes == 0x0f or (attributes & 0x08) != 0) continue;
+            if (equalShortName(item[0..11], wanted)) {
+                const high: u32 = le16(item[20..22]);
+                const low: u32 = le16(item[26..28]);
+                return .{ .entry = .{ .cluster = (high << 16) | low, .size = le32(item[28..32]) } };
+            }
+        }
+        return null;
+    }
+
+    fn clusterSector(self: FileSystem, cluster: u32) Error!u64 {
+        const relative = std.math.mul(u64, cluster - 2, self.sectors_per_cluster) catch return error.Overflow;
+        const sector = std.math.add(u64, self.data_start, relative) catch return error.Overflow;
+        if (sector >= self.device.block_count or self.sectors_per_cluster > self.device.block_count - sector) return error.ClusterOutOfRange;
+        return sector;
+    }
+
+    fn validateCluster(self: FileSystem, cluster: u32) Error!void {
+        if (cluster < 2 or cluster >= self.cluster_count + 2) return error.ClusterOutOfRange;
+    }
+
+    fn nextCluster(self: FileSystem, cluster: u32) Error!u32 {
+        const width: u64 = if (self.fat_type == .fat16) 2 else 4;
+        const byte_offset = std.math.mul(u64, cluster, width) catch return error.Overflow;
+        const lba = self.fat_start + byte_offset / 512;
+        var sector: [512]u8 = undefined;
+        try self.device.read(lba, &sector);
+        const entry_offset: usize = @intCast(byte_offset % 512);
+        const value: u32 = if (self.fat_type == .fat16) le16(sector[entry_offset..][0..2]) else le32(sector[entry_offset..][0..4]) & 0x0fffffff;
+        if (self.fat_type == .fat16) {
+            if (value >= 0xfff8) return error.TruncatedChain;
+            if (value == 0xfff7) return error.BadCluster;
+            if (value >= 0xfff0) return error.ReservedCluster;
+        } else {
+            if (value >= 0x0ffffff8) return error.TruncatedChain;
+            if (value == 0x0ffffff7) return error.BadCluster;
+            if (value >= 0x0ffffff0) return error.ReservedCluster;
+        }
+        if (value < 2 or value >= self.cluster_count + 2) return error.ClusterOutOfRange;
+        return value;
+    }
+};
+
+fn equalShortName(first: *const [11]u8, second: *const [11]u8) bool {
+    // Disk structures are byte-aligned, and EL1 enables alignment checks.
+    const first_bytes: *const volatile [11]u8 = first;
+    const second_bytes: *const volatile [11]u8 = second;
+    for (0..11) |index| {
+        if (first_bytes[index] != second_bytes[index]) return false;
+    }
+    return true;
+}
+
+fn shortName(name: []const u8, result: *[11]u8) Error!void {
+    if (name.len == 0) return error.InvalidName;
+    const dot = std.mem.findScalarLast(u8, name, '.');
+    const base_len = dot orelse name.len;
+    const ext_start = if (dot) |at| at + 1 else name.len;
+    const ext_len = name.len - ext_start;
+    if (base_len == 0 or base_len > 8 or ext_len > 3 or (dot != null and ext_len == 0)) return error.InvalidName;
+    const output: *volatile [11]u8 = result;
+    for (0..result.len) |index| output[index] = ' ';
+    for (name[0..base_len], 0..) |byte, i| result[i] = try shortChar(byte);
+    for (name[ext_start..], 0..) |byte, i| result[8 + i] = try shortChar(byte);
+}
+
+fn shortChar(byte: u8) Error!u8 {
+    const upper = if (byte >= 'a' and byte <= 'z') byte - 32 else byte;
+    if ((upper >= 'A' and upper <= 'Z') or (upper >= '0' and upper <= '9') or std.mem.findScalar(u8, "$%'-_@~`!(){}^#&", upper) != null) return upper;
+    return error.InvalidName;
+}
+
+fn le16(bytes: *const [2]u8) u16 {
+    // Volatile byte reads prevent optimized unaligned integer accesses.
+    const input: *const volatile [2]u8 = bytes;
+    return @as(u16, input[0]) | @as(u16, input[1]) << 8;
+}
+
+fn le32(bytes: *const [4]u8) u32 {
+    const input: *const volatile [4]u8 = bytes;
+    return @as(u32, input[0]) |
+        @as(u32, input[1]) << 8 |
+        @as(u32, input[2]) << 16 |
+        @as(u32, input[3]) << 24;
+}
+
+const MemoryDevice = struct {
+    bytes: []u8,
+    fn read(context: *anyopaque, first: u64, destination: []u8) block.Error!void {
+        const self: *MemoryDevice = @ptrCast(@alignCast(context));
+        const start = first * 512;
+        @memcpy(destination, self.bytes[@intCast(start)..][0..destination.len]);
+    }
+    fn device(self: *MemoryDevice) block.BlockDevice {
+        return .{ .context = self, .readBlocks = read, .block_size = 512, .block_count = self.bytes.len / 512 };
+    }
+};
+
+fn put16(bytes: []u8, value: u16) void {
+    std.mem.writeInt(u16, bytes[0..2], value, .little);
+}
+fn put32(bytes: []u8, value: u32) void {
+    std.mem.writeInt(u32, bytes[0..4], value, .little);
+}
+
+fn makeImage(allocator: std.mem.Allocator, kind: FatType) ![]u8 {
+    const clusters: u32 = if (kind == .fat16) 4085 else 65525;
+    const fat_sectors: u32 = if (kind == .fat16) 16 else 512;
+    const reserved: u32 = if (kind == .fat16) 1 else 32;
+    const root_sectors: u32 = if (kind == .fat16) 2 else 0;
+    const total = reserved + fat_sectors + root_sectors + clusters;
+    const image = try allocator.alloc(u8, @as(usize, total) * 512);
+    @memset(image, 0);
+    put16(image[11..13], 512);
+    image[13] = 1;
+    put16(image[14..16], @intCast(reserved));
+    image[16] = 1;
+    put16(image[17..19], if (kind == .fat16) 32 else 0);
+    if (kind == .fat16) {
+        put16(image[19..21], @intCast(total));
+        put16(image[22..24], @intCast(fat_sectors));
+    } else {
+        put32(image[32..36], total);
+        put32(image[36..40], fat_sectors);
+        put32(image[44..48], 2);
+    }
+    image[510] = 0x55;
+    image[511] = 0xaa;
+    const fat = image[@as(usize, reserved) * 512 ..];
+    const data_sector = reserved + fat_sectors + root_sectors;
+    const root = if (kind == .fat16) image[@as(usize, reserved + fat_sectors) * 512 ..] else image[@as(usize, data_sector) * 512 ..];
+    @memcpy(root[0..11], "USER1   ELF");
+    root[11] = 0x20;
+    const first_cluster: u32 = if (kind == .fat16) 2 else 5;
+    put16(root[26..28], @truncate(first_cluster));
+    put16(root[20..22], @truncate(first_cluster >> 16));
+    put32(root[28..32], 700);
+    const second_cluster: u32 = if (kind == .fat16) 4 else 7;
+    if (kind == .fat16) {
+        put16(fat[first_cluster * 2 ..][0..2], @intCast(second_cluster));
+        put16(fat[second_cluster * 2 ..][0..2], 0xffff);
+    } else {
+        put32(fat[2 * 4 ..][0..4], 0x0fffffff);
+        put32(fat[first_cluster * 4 ..][0..4], second_cluster);
+        put32(fat[second_cluster * 4 ..][0..4], 0xafffffff); // high nibble must be masked
+    }
+    @memset(image[@as(usize, data_sector + first_cluster - 2) * 512 ..][0..512], 'A');
+    @memset(image[@as(usize, data_sector + second_cluster - 2) * 512 ..][0..512], 'B');
+    return image;
+}
+
+test "FAT16 and FAT32 read a fragmented short-name file" {
+    for ([_]FatType{ .fat16, .fat32 }) |kind| {
+        const image = try makeImage(std.testing.allocator, kind);
+        defer std.testing.allocator.free(image);
+        var memory = MemoryDevice{ .bytes = image };
+        const file_system = try FileSystem.mount(memory.device());
+        try std.testing.expectEqual(kind, file_system.fat_type);
+        var output: [700]u8 = undefined;
+        const contents = try file_system.readFile("user1.elf", &output);
+        try std.testing.expectEqual(@as(usize, 700), contents.len);
+        for (contents[0..512]) |byte| try std.testing.expectEqual(@as(u8, 'A'), byte);
+        for (contents[512..]) |byte| try std.testing.expectEqual(@as(u8, 'B'), byte);
+        try std.testing.expectError(error.BufferTooSmall, file_system.readFile("USER1.ELF", output[0..699]));
+        try std.testing.expectError(error.InvalidName, file_system.readFile("TOO-LONG-NAME.ELF", &output));
+    }
+}
+
+test "FAT rejects malformed BPBs and broken chains" {
+    const image = try makeImage(std.testing.allocator, .fat16);
+    defer std.testing.allocator.free(image);
+    var memory = MemoryDevice{ .bytes = image };
+    var file_system = try FileSystem.mount(memory.device());
+    const fat = image[512..];
+    put16(fat[4..6], 2);
+    var output: [700]u8 = undefined;
+    try std.testing.expectError(error.ChainLoop, file_system.readFile("USER1.ELF", &output));
+    put16(image[11..13], 0);
+    try std.testing.expectError(error.InvalidBpb, FileSystem.mount(memory.device()));
+}

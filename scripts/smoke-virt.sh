@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-kernel=${1:?usage: smoke-virt.sh KERNEL_ELF}
+kernel=${1:?usage: smoke-virt.sh KERNEL_ELF FAT_IMAGE}
+user_disk=${2:?usage: smoke-virt.sh KERNEL_ELF FAT_IMAGE}
 transcript=$(mktemp)
 qemu_log=$(mktemp)
 trap 'rm -f "$transcript" "$qemu_log"' EXIT
@@ -15,7 +16,10 @@ timeout 5s qemu-system-aarch64 \
   -display none \
   -monitor none \
   -serial "file:$transcript" \
-  -kernel "$kernel" >"$qemu_log" 2>&1
+  -global virtio-mmio.force-legacy=false \
+  -kernel "$kernel" \
+  -drive "file=$user_disk,format=raw,if=none,readonly=on,id=users" \
+  -device virtio-blk-device,drive=users >"$qemu_log" 2>&1
 status=$?
 set -e
 
@@ -67,6 +71,13 @@ fi
 
 require_ordered \
   '^MEMORY:OK' \
+  '^INITRAMFS:FILES=0x0000000000000002' \
+  '^INITRAMFS:OK' \
+  '^BLOCK:SECTORS=0x0000000000002000' \
+  '^VIRTIO_BLK:OK' \
+  '^FAT:FILES=0x0000000000000002' \
+  '^FAT:IMAGES_MATCH' \
+  '^FAT:OK' \
   '^MMU:ENABLED' \
   '^MMU:HIGH_PC=0xffff' \
   '^MMU:HIGH_SP=0xffff' \
@@ -135,4 +146,5 @@ require_ordered \
   '^USER:SYSCALLS_OK' \
   '^USER:OK' \
   '^SCHED:OK' \
+  '^PHASE9:OK' \
   '^BOOT:OK'

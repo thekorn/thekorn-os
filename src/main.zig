@@ -5,8 +5,11 @@ const exceptions = @import("arch/aarch64/exceptions.zig");
 const mmu = @import("arch/aarch64/mmu.zig");
 const timer = @import("arch/aarch64/timer.zig");
 const embedded_users = @import("embedded_users");
+const cpio = @import("formats/cpio.zig");
 const elf = @import("formats/elf.zig");
+const fat = @import("formats/fat.zig");
 const fdt = @import("formats/fdt.zig");
+const block_device = @import("kernel/block_device.zig");
 const physical_memory = @import("kernel/physical_memory.zig");
 const process = @import("kernel/process.zig");
 const scheduler = @import("kernel/scheduler.zig");
@@ -34,6 +37,7 @@ const fault_status_mask = 0x3f;
 const translation_fault_first = 0x04;
 const translation_fault_last = 0x07;
 const permission_fault_level_three = 0x0f;
+const user_image_names = [process.count][]const u8{ "USER1.ELF", "USER2.ELF" };
 
 const MmuProbe = enum {
     none,
@@ -58,6 +62,7 @@ var scheduling_phase: u8 = cooperative_phase;
 var cooperative_progress: [scheduler.task_count]usize = @splat(0);
 var preemptive_progress: [scheduler.task_count]usize = @splat(0);
 var processes: [process.count]process.Process align(mmu.page_size) linksection(if (builtin.target.ofmt == .macho) "__DATA,__process_bss" else ".process.bss") = @splat(.{});
+var storage_file_buffer: [process.image_size]u8 align(mmu.page_size) = undefined;
 
 extern var __kernel_start: u8;
 extern var __kernel_end: u8;
@@ -302,6 +307,7 @@ fn finishScheduler() noreturn {
     KernelConsole.write("USER:SYSCALLS_OK\n");
     KernelConsole.write("USER:OK\n");
     KernelConsole.write("SCHED:OK\n");
+    KernelConsole.write("PHASE9:OK\n");
     KernelConsole.write("BOOT:OK\n");
     halt();
 }
@@ -342,8 +348,8 @@ fn initializeMmu() noreturn {
     const data_start: u64 = @intFromPtr(&__data_start);
     const kernel_end: u64 = @intFromPtr(&__kernel_end);
 
-    processes[0].load(&embedded_users.one) catch mmuFailed();
-    processes[1].load(&embedded_users.two) catch mmuFailed();
+    loadProcessesFromInitramfs();
+    if (uart.supports_block_device) loadProcessesFromFat();
     for (&processes) |*item| {
         for (uart.mmio_regions) |region| {
             item.address_space.map(region.start, region.end, .device_read_write) catch mmuFailed();
@@ -369,6 +375,50 @@ fn initializeMmu() noreturn {
     const vector_base = mmu.highAddress(@intFromPtr(&__exception_vectors)) catch mmuFailed();
     const stack_top = mmu.highAddress(@intFromPtr(&__stack_top)) catch mmuFailed();
     mmuEnterHighHalf(continuation, vector_base, stack_top);
+}
+
+fn loadProcessesFromInitramfs() void {
+    const archive = cpio.Archive.init(&embedded_users.initramfs);
+    if ((archive.find("MISSING") catch storageFailed()) != null) storageFailed();
+    for (&processes, user_image_names) |*item, name| {
+        const bytes = (archive.find(name) catch storageFailed()) orelse storageFailed();
+        item.load(bytes) catch storageFailed();
+    }
+    KernelConsole.writeHex("INITRAMFS:FILES=", process.count);
+    KernelConsole.write("INITRAMFS:OK\n");
+}
+
+fn loadProcessesFromFat() void {
+    uart.block.initialize() catch storageFailed();
+    const device: block_device.BlockDevice = .{
+        .context = uart.block.context(),
+        .readBlocks = uart.block.readBlocks,
+        .block_size = uart.block.sector_size,
+        .block_count = uart.block.blockCount(),
+    };
+    const file_system = fat.FileSystem.mount(device) catch storageFailed();
+    if (file_system.fat_type != .fat16) storageFailed();
+    const archive = cpio.Archive.init(&embedded_users.initramfs);
+
+    KernelConsole.writeHex("BLOCK:SECTORS=", device.block_count);
+    KernelConsole.write("VIRTIO_BLK:OK\n");
+    for (&processes, user_image_names) |*item, name| {
+        const bytes = file_system.readFile(name, &storage_file_buffer) catch storageFailed();
+        const initramfs_bytes = (archive.find(name) catch storageFailed()) orelse storageFailed();
+        if (!equalStorageBytes(bytes, initramfs_bytes)) storageFailed();
+        item.load(bytes) catch storageFailed();
+    }
+    KernelConsole.writeHex("FAT:FILES=", process.count);
+    KernelConsole.write("FAT:IMAGES_MATCH\n");
+    KernelConsole.write("FAT:OK\n");
+}
+
+fn equalStorageBytes(first: []const u8, second: []const u8) bool {
+    if (first.len != second.len) return false;
+    for (first, second) |left, right| {
+        if (left != right) return false;
+    }
+    return true;
 }
 
 fn mapHighHalf(physical_start: u64, physical_end: u64, mapping: mmu.Mapping) void {
@@ -484,6 +534,11 @@ fn finishMmuProbe(probe: MmuProbe) void {
 
 fn memoryFailed() noreturn {
     KernelConsole.write("MEMORY:FAILED\n");
+    halt();
+}
+
+fn storageFailed() noreturn {
+    KernelConsole.write("STORAGE:FAILED\n");
     halt();
 }
 
@@ -804,8 +859,11 @@ fn resetTestOutput() void {
 }
 
 test {
+    _ = block_device;
+    _ = cpio;
     _ = exceptions;
     _ = elf;
+    _ = fat;
     _ = fdt;
     _ = mmu;
     _ = physical_memory;
@@ -963,6 +1021,13 @@ test "embedded user programs are loadable AArch64 ELF images" {
         try std.testing.expectEqual(process.image_address, image.entry);
         try std.testing.expect(image.program_header_count >= 2);
     }
+}
+
+test "generated initramfs contains both embedded user programs" {
+    const archive = cpio.Archive.init(&embedded_users.initramfs);
+    try std.testing.expect((try archive.find("MISSING")) == null);
+    try std.testing.expectEqualSlices(u8, &embedded_users.one, (try archive.find("USER1.ELF")).?);
+    try std.testing.expectEqualSlices(u8, &embedded_users.two, (try archive.find("USER2.ELF")).?);
 }
 
 test "embedded user programs load into independent address spaces" {

@@ -21,10 +21,13 @@ The low kernel alias is removed while device mappings remain available through
 the active `TTBR0_EL1` root. QEMU verifies this transition and page-granular
 W^X permissions; the updated image still needs a physical-board rerun.
 
-The Phase 8 QEMU gate runs three tasks on separate kernel stacks. After the
-cooperative round-robin checkpoint, task 0 remains an EL1 progress witness
-while tasks 1 and 2 become independently mapped Zig EL0 processes. Their
-embedded AArch64 ELF images use identical entry, data, heap, and stack virtual
+The Phase 9 QEMU gate first loads two AArch64 ELF programs from a deterministic
+embedded `newc` initramfs, then reloads them from a deterministic 4 MiB FAT16
+image through a polling virtio-mmio block device. The kernel verifies that both
+sources contain identical programs before starting three tasks on separate
+kernel stacks. After the cooperative round-robin checkpoint, task 0 remains an
+EL1 progress witness while tasks 1 and 2 become independently mapped Zig EL0
+processes. Their ELF images use identical entry, data, heap, and stack virtual
 addresses backed by separate memory and `TTBR0_EL1` roots. Each process uses
 the versioned project ABI for `write`, `yield`, `exit`, and bounded memory
 growth and is preempted during the same 1,000-tick timer run.
@@ -51,6 +54,8 @@ The default build uses `ReleaseSmall` code generation while retaining symbols
 and debug information in the ELF. It creates:
 
 - `zig-out/bin/thekorn_os` — symbol-rich QEMU `virt` ELF linked at `0x40080000`
+- `zig-out/users-fat16.img` — deterministic, read-only FAT16 image containing
+  both Zig user programs for the QEMU virtio block device
 - `zig-out/kernel8.img` — raw Raspberry Pi 4 kernel linked at `0x80000`
 - `zig-out/thekorn-os-rpi4.img` — 64 MiB Pi-ready SD-card image with an MBR,
   FAT32 boot partition, the pinned Raspberry Pi firmware release, and the Pi
@@ -124,16 +129,18 @@ synchronous vector, reports ESR/ELR/SPSR/FAR, and resumes after the trapped
 instruction. It disables FP/SIMD and proves an accidental floating-point
 instruction traps visibly. Three tasks then make bounded progress on separate
 16 KiB kernel stacks: first through 95 cooperative round-robin switches, then
-through exactly 1,000 timer preemptions. During the preemptive gate, two
-freestanding Zig executables are parsed as ELF64 images and loaded into
-independent address spaces. Both run from the same virtual addresses, retain
-private data and heap identities, preserve separate `SP_EL0` values across a
-yield, and receive timer preemption while task 0 continues at EL1. Each process
-proves versioned syscall decoding, checked user pointers, on-demand growth
-within a four-page heap window, clean exit, and direct-access faults for UART
-and removed kernel mappings. The checkpoint emits `PROCESS:ISOLATION_OK`,
-`USER:OK`, `SCHED:OK`, and `BOOT:OK` before QEMU is terminated by the
-smoke-test timeout.
+through exactly 1,000 timer preemptions. Before enabling the MMU, the kernel
+parses both ELF64 images from its embedded initramfs, discovers the modern QEMU
+virtio-mmio block transport, and reads the same files through the read-only
+FAT16/32 implementation. It emits `INITRAMFS:OK`, `VIRTIO_BLK:OK`, and `FAT:OK`
+after validating this storage path. During the preemptive gate, both programs
+run from the same virtual addresses, retain private data and heap identities,
+preserve separate `SP_EL0` values across a yield, and receive timer preemption
+while task 0 continues at EL1. Each process proves versioned syscall decoding,
+checked user pointers, on-demand growth within a four-page heap window, clean
+exit, and direct-access faults for UART and removed kernel mappings. The
+checkpoint emits `PROCESS:ISOLATION_OK`, `USER:OK`, `SCHED:OK`, `PHASE9:OK`, and
+`BOOT:OK` before QEMU is terminated by the smoke-test timeout.
 Before exception testing, it parses the QEMU DTB, reserves firmware, DTB, and
 kernel-owned memory, sweeps all allocatable frames, and emits `MEMORY:OK`.
 It then enables a protected identity map, installs the kernel's high-half
@@ -179,3 +186,6 @@ and Zig source locations.
 - Phase 8: complete on QEMU — two embedded Zig ELF processes run at identical
   virtual addresses with independent backing, `TTBR0_EL1` roots, user stacks,
   data, and bounded heaps; physical-board validation remains deferred
+- Phase 9: complete on QEMU — deterministic initramfs and FAT16 images, a
+  polling modern virtio-mmio block driver, a read-only block-device contract,
+  and host-tested FAT16/32 parsing feed the isolated two-process smoke gate

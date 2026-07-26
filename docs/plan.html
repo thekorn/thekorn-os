@@ -260,8 +260,8 @@
           <h1>A Zig operating system for Raspberry Pi 4, built QEMU-first</h1>
           <p class="lede">Grow the current Zig starter into a small, inspectable ARMv8 kernel. Keep the fast loop local and deterministic in QEMU, then port the same platform-neutral kernel to BCM2711 hardware.</p>
           <div class="metadata">
-            <span class="meta">Status: Phase 7 complete in QEMU · Phase 5 hardware rerun pending</span>
-            <span class="meta">Updated: 2026-07-25</span>
+            <span class="meta">Status: Phase 9 complete in QEMU · Phase 5 hardware rerun pending</span>
+            <span class="meta">Updated: 2026-07-26</span>
             <span class="meta">Zig: pinned 0.17 development snapshot</span>
           </div>
         </div>
@@ -271,7 +271,7 @@
       <div class="summary-grid" aria-label="Plan summary">
         <div class="summary-card primary"><span class="meta">Target</span><strong>Pi 4</strong><span>BCM2711 · Cortex-A72 · AArch64</span></div>
         <div class="summary-card"><span class="meta">Inner loop</span><strong>QEMU virt</strong><span>Fast, scriptable, GDB-friendly</span></div>
-        <div class="summary-card"><span class="meta">Roadmap</span><strong>11 phases</strong><span>Boot to two isolated Zig processes</span></div>
+        <div class="summary-card"><span class="meta">Roadmap</span><strong>11 phases</strong><span>Boot to two FAT-backed Zig processes</span></div>
         <div class="summary-card"><span class="meta">Strategy</span><strong>3 targets</strong><span>virt · raspi4b · physical Pi</span></div>
       </div>
     </header>
@@ -308,7 +308,7 @@
               </ul>
             </article>
           </div>
-          <p class="note"><strong>Current repository:</strong> Phases 0 through 4 and the QEMU implementation of Phases 5 through 7 are complete. The project builds a symbol-rich QEMU ELF plus a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. The Phase 2 baseline has booted successfully on a physical Pi 4: it enters EL1h, reports boot facts over PL011, discovers memory from the firmware DTB, emits <code>MEMORY:OK</code>, handles and returns from the deliberate <code>brk</code>, and emits <code>BOOT:OK</code>. QEMU additionally verifies a protected high-half kernel with its low alias removed, predictable W^X faults, explicit FP/SIMD trapping, and three tasks making bounded progress through cooperative and timer-driven round-robin switching. Task 2 becomes a preempted EL0 fixture after the cooperative gate and proves the versioned syscall ABI, bounded heap growth, clean exit, and isolation from UART and kernel memory while tasks 0 and 1 remain EL1 witnesses. The updated Phase 5 image still needs a physical-board rerun; that validation is intentionally deferred.</p>
+          <p class="note"><strong>Current repository:</strong> Phases 0 through 4 and the QEMU implementation of Phases 5 through 9 are complete. The project builds a symbol-rich QEMU ELF, a deterministic FAT16 user-program disk, and a reproducible, flashable Pi 4 card image with firmware pinned by <code>build.zig.zon</code> and a BCM2711 GPIO/PL011 backend. The Phase 2 baseline has booted successfully on a physical Pi 4: it enters EL1h, reports boot facts over PL011, discovers memory from the firmware DTB, emits <code>MEMORY:OK</code>, handles and returns from the deliberate <code>brk</code>, and emits <code>BOOT:OK</code>. QEMU additionally verifies a protected high-half kernel with its low alias removed, predictable W^X faults, explicit FP/SIMD trapping, and three tasks making bounded progress through cooperative and timer-driven round-robin switching. Two isolated, preempted EL0 processes load first from an embedded initramfs and then from read-only FAT through a polling virtio-mmio block device; both prove the versioned syscall ABI, bounded heap growth, clean exit, and isolation from UART and kernel memory while an EL1 task remains a progress witness. The updated Phase 5 image still needs a physical-board rerun; that validation is intentionally deferred.</p>
         </section>
 
         <section id="strategy">
@@ -405,7 +405,7 @@
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 9</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><h3>Initramfs, then read-only FAT in QEMU</h3><p>First load a Zig process from a tiny deterministic initramfs so process loading is independent of block-driver work. Then define a narrow block-device contract, add QEMU virtio-blk, and implement a host-tested, read-only FAT16/32 parser before any write path.</p><div class="tags"><span class="tag">initramfs</span><span class="tag">BlockDevice</span><span class="tag">virtio-blk</span><span class="tag">FAT</span></div><div class="exit"><strong>Exit:</strong> an automated, timeout-bounded demo runs self-checks, loads two isolated Zig programs from a reproducible FAT image, proves timer preemption, and prints a final pass marker.</div></div>
+              <div class="milestone-body"><span class="status recommended">Complete · QEMU verified</span><h3>Initramfs, then read-only FAT in QEMU</h3><p>First load Zig programs from a tiny deterministic initramfs so process loading is independent of block-driver work. Then define a narrow block-device contract, add QEMU virtio-blk, and implement a host-tested, read-only FAT16/32 parser before any write path.</p><div class="tags"><span class="tag">initramfs</span><span class="tag">BlockDevice</span><span class="tag">virtio-blk</span><span class="tag">FAT</span></div><div class="exit"><strong>Exit verified in QEMU:</strong> the timeout-bounded smoke test loads and validates two ELF programs from a deterministic <code>newc</code> initramfs, rereads byte-identical files from a reproducible FAT16 image through a modern polling virtio-mmio block device, runs both in isolated address spaces through 1,000 timer preemptions, and emits <code>PHASE9:OK</code>.</div></div>
             </article>
             <article class="milestone">
               <div class="phase-label">Phase 10</div><div class="rail"><span class="dot"></span></div>
