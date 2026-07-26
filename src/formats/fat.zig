@@ -332,3 +332,45 @@ test "FAT rejects malformed BPBs and broken chains" {
     put16(image[11..13], 0);
     try std.testing.expectError(error.InvalidBpb, FileSystem.mount(memory.device()));
 }
+
+test "FAT16 scans every root sector and reports a truncated file chain" {
+    const image = try makeImage(std.testing.allocator, .fat16);
+    defer std.testing.allocator.free(image);
+    var memory = MemoryDevice{ .bytes = image };
+    const file_system = try FileSystem.mount(memory.device());
+    const root_offset: usize = @intCast(file_system.root_start * 512);
+    var entry: [32]u8 = undefined;
+    @memcpy(&entry, image[root_offset..][0..32]);
+    for (0..16) |index| image[root_offset + index * 32] = 0xe5;
+    @memcpy(image[root_offset + 512 ..][0..32], &entry);
+
+    var output: [700]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 700), (try file_system.readFile("USER1.ELF", &output)).len);
+
+    const fat_offset: usize = @intCast(file_system.fat_start * 512);
+    put16(image[fat_offset + 4 ..][0..2], 0xffff);
+    try std.testing.expectError(error.TruncatedChain, file_system.readFile("USER1.ELF", &output));
+    try std.testing.expectError(error.InvalidName, file_system.readFile("USER?.ELF", &output));
+}
+
+test "FAT32 follows chained root directories and terminates missing searches" {
+    const image = try makeImage(std.testing.allocator, .fat32);
+    defer std.testing.allocator.free(image);
+    var memory = MemoryDevice{ .bytes = image };
+    const file_system = try FileSystem.mount(memory.device());
+    const fat_offset: usize = @intCast(file_system.fat_start * 512);
+    const first_root_offset: usize = @intCast(file_system.data_start * 512);
+    const second_root_offset = first_root_offset + 512;
+    var entry: [32]u8 = undefined;
+    @memcpy(&entry, image[first_root_offset..][0..32]);
+    for (0..16) |index| image[first_root_offset + index * 32] = 0xe5;
+    @memcpy(image[second_root_offset..][0..32], &entry);
+    put32(image[fat_offset + 2 * 4 ..][0..4], 3);
+    put32(image[fat_offset + 3 * 4 ..][0..4], 0x0fff_ffff);
+
+    var output: [700]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 700), (try file_system.readFile("USER1.ELF", &output)).len);
+
+    for (0..16) |index| image[second_root_offset + index * 32] = 0xe5;
+    try std.testing.expectError(error.NotFound, file_system.readFile("USER1.ELF", &output));
+}

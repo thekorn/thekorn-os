@@ -162,3 +162,16 @@ test "blocked tasks are skipped by subsequent dispatches" {
     try std.testing.expectEqual(@as(u64, 1), second_again.registers[0]);
     try std.testing.expectEqual(@as(usize, 1), scheduler.preemptions());
 }
+
+test "scheduler reports inactive and exhausted run queues" {
+    var scheduler: Scheduler = .{};
+    scheduler.init(0x1000, 0x345);
+    var boot_frame = std.mem.zeroes(exceptions.Frame);
+
+    try std.testing.expectError(error.NotRunning, scheduler.blockCurrent(&boot_frame));
+    var frame = try scheduler.dispatch(&boot_frame, .cooperative);
+    frame = try scheduler.blockCurrent(frame);
+    frame = try scheduler.blockCurrent(frame);
+    try std.testing.expectError(error.NoRunnableTask, scheduler.blockCurrent(frame));
+    try std.testing.expectError(error.NoRunnableTask, scheduler.dispatch(frame, .cooperative));
+}

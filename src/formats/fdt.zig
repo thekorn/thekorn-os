@@ -231,6 +231,83 @@ pub fn parse(bytes: []const u8) ParseError!Info {
     return error.Truncated;
 }
 
+fn appendBe32(bytes: *std.ArrayList(u8), allocator: std.mem.Allocator, value: u32) !void {
+    var encoded: [4]u8 = undefined;
+    std.mem.writeInt(u32, &encoded, value, .big);
+    try bytes.appendSlice(allocator, &encoded);
+}
+
+fn padFdt(bytes: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    while (bytes.items.len % 4 != 0) try bytes.append(allocator, 0);
+}
+
+fn appendFdtNode(bytes: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8) !void {
+    try appendBe32(bytes, allocator, 1);
+    try bytes.appendSlice(allocator, name);
+    try bytes.append(allocator, 0);
+    try padFdt(bytes, allocator);
+}
+
+fn appendFdtProperty(
+    bytes: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    name_offset: u32,
+    data: []const u8,
+) !void {
+    try appendBe32(bytes, allocator, 3);
+    try appendBe32(bytes, allocator, @intCast(data.len));
+    try appendBe32(bytes, allocator, name_offset);
+    try bytes.appendSlice(allocator, data);
+    try padFdt(bytes, allocator);
+}
+
+fn makeVirtioBlob(
+    allocator: std.mem.Allocator,
+    include_reg: bool,
+    final_token: ?u32,
+) ![]u8 {
+    var structure: std.ArrayList(u8) = .empty;
+    defer structure.deinit(allocator);
+    try appendFdtNode(&structure, allocator, "");
+    try appendFdtNode(&structure, allocator, "virtio@a000000");
+    try appendFdtProperty(
+        &structure,
+        allocator,
+        0,
+        "vendor,device\x00virtio,mmio\x00",
+    );
+    if (include_reg) {
+        try appendFdtProperty(
+            &structure,
+            allocator,
+            "compatible".len + 1,
+            &.{ 0, 0, 0, 0, 0x0a, 0, 0, 0, 0, 0, 2, 0 },
+        );
+    }
+    try appendBe32(&structure, allocator, 2);
+    try appendBe32(&structure, allocator, 2);
+    if (final_token) |token| try appendBe32(&structure, allocator, token);
+
+    const strings = "compatible\x00reg\x00";
+    const structure_offset = 40 + 16;
+    const strings_offset = structure_offset + structure.items.len;
+    const total = strings_offset + strings.len;
+    const blob = try allocator.alloc(u8, total);
+    @memset(blob, 0);
+    std.mem.writeInt(u32, blob[0..4], magic, .big);
+    std.mem.writeInt(u32, blob[4..8], @intCast(total), .big);
+    std.mem.writeInt(u32, blob[8..12], @intCast(structure_offset), .big);
+    std.mem.writeInt(u32, blob[12..16], @intCast(strings_offset), .big);
+    std.mem.writeInt(u32, blob[16..20], 40, .big);
+    std.mem.writeInt(u32, blob[20..24], 17, .big);
+    std.mem.writeInt(u32, blob[24..28], 16, .big);
+    std.mem.writeInt(u32, blob[32..36], @intCast(strings.len), .big);
+    std.mem.writeInt(u32, blob[36..40], @intCast(structure.items.len), .big);
+    @memcpy(blob[structure_offset..strings_offset], structure.items);
+    @memcpy(blob[strings_offset..], strings);
+    return blob;
+}
+
 test "rejects malformed FDT headers" {
     try std.testing.expectError(error.Truncated, parse("short"));
     var header: [40]u8 = undefined;
@@ -298,4 +375,31 @@ test "discovers RAM and both reservation forms" {
     var invalid_cells_blob = blob;
     @memset(invalid_cells_blob[92..96], 0xff);
     try std.testing.expectError(error.BadCells, parse(&invalid_cells_blob));
+}
+
+test "discovers virtio MMIO nodes in compatible string lists" {
+    try std.testing.expect(!containsString("vendor,device\x00other\x00", "virtio,mmio"));
+    const blob = try makeVirtioBlob(std.testing.allocator, true, 9);
+    defer std.testing.allocator.free(blob);
+
+    const info = try parse(blob);
+    try std.testing.expectEqual(@as(usize, 1), info.virtio_mmio_count);
+    try std.testing.expectEqualDeep(
+        Range{ .address = 0x0a00_0000, .size = 0x200 },
+        info.virtio_mmio[0],
+    );
+}
+
+test "rejects virtio nodes without registers and malformed structure endings" {
+    const missing_reg = try makeVirtioBlob(std.testing.allocator, false, 9);
+    defer std.testing.allocator.free(missing_reg);
+    try std.testing.expectError(error.BadProperty, parse(missing_reg));
+
+    const bad_token = try makeVirtioBlob(std.testing.allocator, true, 0xffff_ffff);
+    defer std.testing.allocator.free(bad_token);
+    try std.testing.expectError(error.BadToken, parse(bad_token));
+
+    const missing_end = try makeVirtioBlob(std.testing.allocator, true, null);
+    defer std.testing.allocator.free(missing_end);
+    try std.testing.expectError(error.Truncated, parse(missing_end));
 }

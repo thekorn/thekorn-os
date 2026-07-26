@@ -298,6 +298,13 @@ test "Renderer rejects malformed framebuffer layouts" {
         .pitch = 8,
         .format = .xrgb8888,
     }));
+    try std.testing.expectError(error.InvalidDimensions, Renderer.init(.{
+        .bytes = &.{},
+        .width = 0,
+        .height = @as(u32, std.math.maxInt(i32)) + 1,
+        .pitch = 0,
+        .format = .xrgb8888,
+    }));
     try std.testing.expectError(error.UnsupportedFormat, Renderer.init(.{
         .bytes = &.{},
         .width = 0,

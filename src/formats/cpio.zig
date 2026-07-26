@@ -137,4 +137,6 @@ test "newc rejects malformed and truncated archives" {
     bytes.items[0] = '0';
     bytes.items[6] = 'z';
     try std.testing.expectError(error.InvalidHex, Archive.init(bytes.items).find("z"));
+    bytes.items[6] = 'F';
+    try std.testing.expectError(error.MissingTrailer, Archive.init(bytes.items).find("z"));
 }
