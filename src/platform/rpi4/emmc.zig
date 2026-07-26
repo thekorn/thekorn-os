@@ -77,8 +77,6 @@ const ocr_high_capacity: u32 = 1 << 30;
 const r1_application_command: u32 = 1 << 5;
 const r1_error_mask: u32 = 0xfdff_e008;
 const r6_error_mask: u32 = (1 << 15) | (1 << 14) | (1 << 13);
-const card_state_mask: u32 = 0xf << 9;
-const card_state_standby: u32 = 3 << 9;
 const user_partition_type: u8 = 0x0e;
 
 const DriverError = error{
@@ -186,11 +184,9 @@ pub fn initialize() DriverError!void {
         0,
         &relative_address,
     );
-    if (relative_address & r6_error_mask != 0 or
-        relative_address & card_state_mask != card_state_standby)
-    {
-        return error.InvalidResponse;
-    }
+    // R6 reports the card state when CMD3 was received (IDENT), before the
+    // command transitions it to standby. Validate only the defined R6 errors.
+    if (relative_address & r6_error_mask != 0) return error.InvalidResponse;
     state.relative_card_address = @truncate(relative_address >> 16);
     if (state.relative_card_address == 0) return error.InvalidResponse;
 
