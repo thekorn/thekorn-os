@@ -26,7 +26,7 @@ if [[ $status -ne 124 ]]; then
   exit 1
 fi
 previous_line=0
-for marker in 'V1:LIFECYCLE_OK' 'V1:INIT'; do
+for marker in 'V1:LIFECYCLE_OK' 'V1:SCHEDULER_OK' 'V1:INIT'; do
   if [[ $(grep -Ec "^${marker}" "$transcript" || true) -ne 1 ]]; then
     echo "smoke-v1: expected ${marker} exactly once" >&2
     exit 1

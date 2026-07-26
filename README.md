@@ -253,10 +253,11 @@ mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
   platform, physical-memory, and high-half MMU initialization; `smoke-v0`
   preserves the complete baseline marker contract and `smoke-v1` requires the
   placeholder `V1:INIT` path
-- V1.1: active — scheduler slots have explicit lifecycle states, fixed wait
+- V1.1: complete — scheduler slots have explicit lifecycle states, fixed wait
   queues provide IRQ-masked wait/wake/cancel transitions, monotonic deadlines
   use wrap-safe comparisons, and an idle task executes `wfi` when every normal
-  task is blocked
+  task is blocked; the QEMU v1 gate proves sleepers wake in deadline order from
+  an all-blocked idle interval
 - V1.2: complete — a 16-slot process table separates monotonic PIDs from
   reusable process and task slots, tracks parentage and owned frames, adopts
   orphans, and retains zombie status for wait-one or wait-any; the QEMU v1 gate

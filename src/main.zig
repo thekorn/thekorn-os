@@ -70,6 +70,7 @@ var floating_point_probe_completed = false;
 var kernel_scheduler: scheduler.Scheduler = .{};
 var scheduling_enabled = false;
 var scheduling_phase: u8 = cooperative_phase;
+var v1_wake_count: usize = 0;
 var cooperative_progress: [scheduler.task_count]usize = @splat(0);
 var preemptive_progress: [scheduler.task_count]usize = @splat(0);
 var processes: [process.count]process.Process align(mmu.page_size) linksection(if (builtin.target.ofmt == .macho) "__DATA,__process_bss" else ".process.bss") = @splat(.{});
@@ -208,6 +209,35 @@ fn idleTask(_: usize) callconv(.c) noreturn {
     while (true) asm volatile ("wfi");
 }
 
+fn v1SchedulerTask(task_id: usize) callconv(.c) noreturn {
+    const deadlines = [scheduler.task_count]usize{ 3, 1, 2 };
+    const expected_order = [scheduler.task_count]usize{ 1, 2, 0 };
+    if (task_id >= deadlines.len) schedulerFailed();
+    schedulerSleep(deadlines[task_id]);
+    const position = @atomicRmw(usize, &v1_wake_count, .Add, 1, .acq_rel);
+    if (position >= expected_order.len or expected_order[position] != task_id) schedulerFailed();
+    if (position + 1 == expected_order.len) {
+        disableInterrupts();
+        if (timer.ticks() < 3) schedulerFailed();
+        KernelConsole.write("V1:SCHEDULER_OK\n");
+        KernelConsole.write("V1:INIT\n");
+        halt();
+    }
+    schedulerBlock();
+}
+
+fn schedulerSleep(deadline: usize) void {
+    _ = asm volatile ("svc #2"
+        : [result] "={x0}" (-> u64),
+        : [deadline] "{x0}" (deadline),
+        : .{ .memory = true });
+}
+
+fn schedulerBlock() noreturn {
+    asm volatile ("svc #3" ::: .{ .memory = true });
+    schedulerFailed();
+}
+
 fn schedulerYield() void {
     asm volatile ("svc #0" ::: .{ .memory = true });
 }
@@ -218,6 +248,7 @@ fn enterUserMode() noreturn {
 }
 
 fn currentProcessIndex() ?usize {
+    if (!build_options.v0_profile) return null;
     const task = kernel_scheduler.currentTask() orelse return null;
     if (task < process.first_task or task >= process.first_task + process.count) return null;
     return task - process.first_task;
@@ -583,8 +614,7 @@ fn kernelHighMain() callconv(.c) noreturn {
         if (identity_map.descriptor(region.start) == null) mmuFailed();
     }
     if (!build_options.v0_profile) {
-        KernelConsole.write("V1:INIT\n");
-        halt();
+        runV1Scheduler();
     }
     if (identity_map.descriptor(process.image_address) != null or
         processes[0].entry != process.image_address or
@@ -614,6 +644,20 @@ fn kernelHighMain() callconv(.c) noreturn {
     verifyMmuProtection();
     KernelConsole.write("MMU:OK\n");
     continueBoot();
+}
+
+fn runV1Scheduler() noreturn {
+    @atomicStore(usize, &v1_wake_count, 0, .release);
+    kernel_scheduler.init(
+        highMappedAddress(@intFromPtr(&v1SchedulerTask)),
+        highMappedAddress(@intFromPtr(&idleTask)),
+        scheduler_initial_spsr,
+    );
+    uart.gic.init();
+    scheduling_enabled = true;
+    timer.init(100);
+    asm volatile ("svc #0" ::: .{ .memory = true });
+    schedulerFailed();
 }
 
 fn highMappedAddress(address: u64) u64 {
@@ -720,6 +764,20 @@ fn handleKernelSupervisorCall(frame: *exceptions.Frame) *exceptions.Frame {
     const immediate = frame.esr & 0xffff;
     if (immediate == 0) {
         return dispatchTask(frame, .cooperative);
+    }
+    if (!build_options.v0_profile) {
+        if (immediate == 2) {
+            saveCurrentUserStack();
+            const next = kernel_scheduler.sleepCurrent(
+                frame,
+                frame.registers[0],
+                timer.ticks(),
+            ) catch schedulerFailed();
+            switchToCurrentTask();
+            return next;
+        }
+        if (immediate == 3) return blockCurrentTask(frame);
+        schedulerFailed();
     }
     const item = currentProcess() orelse schedulerFailed();
     if (immediate != 1 or
@@ -942,6 +1000,7 @@ fn handleIrq(vector: usize, frame: *exceptions.Frame) *exceptions.Frame {
     const interrupt_id = uart.gic.interruptId(acknowledgement);
     if (interrupt_id == uart.gic.physical_timer_interrupt) {
         timer.handleInterrupt();
+        kernel_scheduler.wakeExpired(timer.ticks());
         if (vector == 9) {
             const item = currentProcess() orelse schedulerFailed();
             item.preemptions += 1;
