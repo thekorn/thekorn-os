@@ -408,15 +408,15 @@
         <article class="summary-card primary"><span class="meta">Board</span><strong>Pi 4 Model B</strong><span>BCM2711 · AArch64 · any RAM size</span></article>
         <article class="summary-card"><span class="meta">Flashable artifact</span><strong><code>thekorn-os-rpi4.img</code></strong><span>Complete 64 MiB SD-card image</span></article>
         <article class="summary-card"><span class="meta">Console</span><strong>115200 8N1</strong><span>PL011 · GPIO 14/15 · no flow control</span></article>
-        <article class="summary-card"><span class="meta">Current gate</span><strong>Phase 2 passed</strong><span>Phase 5 MMU image needs a rerun</span></article>
+        <article class="summary-card"><span class="meta">Current gate</span><strong>Phase 10 implemented</strong><span>Complete Pi 4 validation pending</span></article>
       </div>
     </header>
 
     <aside class="status-banner ready" aria-labelledby="current-status">
       <div class="status-mark" aria-hidden="true">✓</div>
       <div>
-        <h2 id="current-status">The baseline passed; rerun the protected image</h2>
-        <p>The Phase 2 image reached <code>BOOT:OK</code> on a physical Pi 4. <code>zig build</code> now creates an updated <code>zig-out/thekorn-os-rpi4.img</code> that also enables a protected identity map. Its QEMU gate passes, but the MMU transition still needs this hardware rerun. The Pi build selects its GPIO/PL011 backend at <code>0xFE201000</code>; the QEMU ELF continues to use the separate <code>virt</code> backend.</p>
+        <h2 id="current-status">The complete v0 image is ready for its hardware gate</h2>
+        <p>The Phase 2 image reached <code>BOOT:OK</code> on a physical Pi 4. <code>zig build</code> now creates the complete v0 <code>zig-out/thekorn-os-rpi4.img</code> with protected high-half mappings, GIC/timer preemption, read-only EMMC2/FAT loading, and two isolated EL0 processes. QEMU verifies the shared kernel path and the <code>raspi4b</code> integration boundary; run <code>scripts/smoke-rpi4-serial.sh</code> to capture and validate the complete physical-board gate.</p>
       </div>
     </aside>
 
@@ -846,7 +846,7 @@ BOOT:OK</code></pre>
 
     <footer>
       <strong>thekorn-os Raspberry Pi 4 field guide</strong><br>
-      Prepare safely now; run on hardware when the Phase 2 BCM2711 UART checkpoint lands.
+      Phase 10 is implemented; run the documented serial gate to complete Pi 4 validation.
     </footer>
   </div>
 

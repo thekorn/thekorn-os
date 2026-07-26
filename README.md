@@ -1,15 +1,16 @@
 # thekorn-os
 
 `thekorn-os` is a small AArch64 learning operating system written in Zig. The
-project is developed QEMU-first and will progressively port the same kernel to
-the Raspberry Pi 4 (BCM2711).
+project is developed QEMU-first and shares the same platform-neutral kernel
+with the Raspberry Pi 4 (BCM2711) port.
 
 The current implementation boots a freestanding kernel in writable QEMU
 `virt` RAM at `0x40080000` and produces a separately linked, flashable
 Raspberry Pi 4 image whose kernel loads at `0x80000`. Both targets enter EL1h,
 install a complete AArch64 exception vector table, initialize their platform's
-PL011 UART, and report boot and exception facts over serial. On QEMU, the
-kernel also handles generic physical timer interrupts through a GICv2. See the
+PL011 UART, and report boot and exception facts over serial. Both platform
+implementations configure a GICv2-compatible interrupt controller and the Arm
+generic physical timer; the complete Pi path awaits its hardware gate. See the
 [v0 implementation plan](docs/plan.html) for the current roadmap and phase
 status, and the [proposed v1 plan](docs/v1-plan.html) for the post-v0
 interactive-system roadmap.
@@ -21,7 +22,8 @@ four-level identity map, enables the EL1 MMU and caches, then moves the kernel,
 stack, and exception vectors into a protected `TTBR1_EL1` high-half mapping.
 The low kernel alias is removed while device mappings remain available through
 the active `TTBR0_EL1` root. QEMU verifies this transition and page-granular
-W^X permissions; the updated image still needs a physical-board rerun.
+W^X permissions; the updated image still needs the complete physical-board
+gate.
 
 The Phase 9 QEMU gate first loads two AArch64 ELF programs from a deterministic
 embedded `newc` initramfs, then reloads them from a deterministic 4 MiB FAT16
@@ -198,7 +200,7 @@ and Zig source locations.
   monotonic tick accounting, and the 1,000-tick smoke-test gate
 - Phase 4: complete — DTB RAM/reservation discovery, 4 KiB bitmap frame
   allocation, host tests, and the QEMU allocation-sweep gate
-- Phase 5: in progress — the protected identity map, high-half `TTBR1_EL1`
+- Phase 5: implemented — the protected identity map, high-half `TTBR1_EL1`
   transition, low-alias removal, W^X fault probes, and QEMU gate are
   implemented; physical-board validation remains
 - Phase 6: complete on QEMU — three separate kernel stacks, cooperative yields,
@@ -213,7 +215,7 @@ and Zig source locations.
 - Phase 9: complete on QEMU — deterministic initramfs and FAT16 images, a
   polling modern virtio-mmio block driver, a read-only block-device contract,
   and host-tested FAT16/32 parsing feed the isolated two-process smoke gate
-- Phase 10: in progress — the Pi 4 BSP configures the BCM2711 GIC-400 and Arm
+- Phase 10: implemented — the Pi 4 BSP configures the BCM2711 GIC-400 and Arm
   generic physical timer, reads its FAT16 user partition through a polling
-  EMMC2 driver, and feeds the existing preemptive two-process demo; physical-
-  board validation remains
+  EMMC2 driver, and feeds the existing preemptive two-process demo; complete
+  physical-board validation remains
