@@ -76,6 +76,28 @@ pub const Allocator = struct {
         return null;
     }
 
+    /// Allocates `count` physically adjacent frames. The allocation is retained
+    /// until each frame is explicitly freed.
+    pub fn allocateContiguous(self: *Allocator, count: usize) ?u64 {
+        if (count == 0 or count > self.frame_count) return null;
+        var start: usize = 0;
+        while (start <= self.frame_count - count) : (start += 1) {
+            var available = true;
+            for (start..start + count) |index| {
+                if (self.get(index)) {
+                    available = false;
+                    start = index;
+                    break;
+                }
+            }
+            if (!available) continue;
+            for (start..start + count) |index| self.set(index, true);
+            self.next = (start + count) % self.frame_count;
+            return self.base + @as(u64, start) * page_size;
+        }
+        return null;
+    }
+
     pub fn free(self: *Allocator, address: u64) FreeError!void {
         if (address % page_size != 0) return error.UnalignedAddress;
         if (address < self.base) return error.AddressOutOfRange;
@@ -140,4 +162,14 @@ test "allocator rejects more RAM ranges than it can retain for free validation" 
     var bitmap: [1]u8 = undefined;
     var ram: [fdt.max_ranges + 1]fdt.Range = undefined;
     try std.testing.expectError(error.TooManyRanges, Allocator.init(&bitmap, &ram));
+}
+
+test "allocator reserves contiguous runs without crossing holes" {
+    var bitmap: [2]u8 = undefined;
+    const ram = [_]fdt.Range{ .{ .address = 0x1000, .size = 0x2000 }, .{ .address = 0x4000, .size = 0x4000 } };
+    var allocator = try Allocator.init(&bitmap, &ram);
+    try std.testing.expectEqual(@as(u64, 0x4000), allocator.allocateContiguous(3).?);
+    try std.testing.expectEqual(@as(u64, 0x1000), allocator.allocateContiguous(2).?);
+    try std.testing.expectEqual(@as(u64, 0x7000), allocator.allocateContiguous(1).?);
+    try std.testing.expectEqual(null, allocator.allocateContiguous(1));
 }

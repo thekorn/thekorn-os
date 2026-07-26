@@ -41,9 +41,21 @@ pub fn build(b: *std.Build) void {
         kernel_target,
         optimize,
         b.path("src/platform/qemu_virt/uart.zig"),
+        false,
     );
     kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
     kernel.root_module.addImport("embedded_users", embedded_users);
+
+    const graphics_kernel = addKernel(
+        b,
+        "thekorn_os_graphics",
+        kernel_target,
+        optimize,
+        b.path("src/platform/qemu_virt/uart.zig"),
+        true,
+    );
+    graphics_kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
+    graphics_kernel.root_module.addImport("embedded_users", embedded_users);
 
     const rpi_kernel = addKernel(
         b,
@@ -51,6 +63,7 @@ pub fn build(b: *std.Build) void {
         kernel_target,
         optimize,
         b.path("src/platform/rpi4/uart.zig"),
+        false,
     );
     rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
     rpi_kernel.root_module.addImport("embedded_users", embedded_users);
@@ -85,7 +98,14 @@ pub fn build(b: *std.Build) void {
     const qemu_image = kernel.addObjCopy(.{ .format = .binary });
     addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", qemu_image.getOutput(), user_disk, false, false);
     addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", qemu_image.getOutput(), user_disk, false, true);
-    addGraphicsQemuStep(b, qemu_image.getOutput(), user_disk);
+    const graphics_image = graphics_kernel.addObjCopy(.{ .format = .binary });
+    addGraphicsQemuStep(b, graphics_image.getOutput(), user_disk);
+    const graphics_smoke = b.addSystemCommand(&.{"bash"});
+    graphics_smoke.addFileArg(b.path("scripts/smoke-virt-graphics.sh"));
+    graphics_smoke.addFileArg(graphics_image.getOutput());
+    graphics_smoke.addFileArg(user_disk);
+    const graphics_smoke_step = b.step("smoke-virt-graphics", "Boot virtio-gpu and verify ordered graphics markers");
+    graphics_smoke_step.dependOn(&graphics_smoke.step);
     addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", qemu_image.getOutput(), user_disk, true, false);
 
     const smoke = b.addSystemCommand(&.{"bash"});
@@ -119,6 +139,9 @@ pub fn build(b: *std.Build) void {
         }},
     });
     native_test_module.addImport("embedded_users", embedded_users);
+    const test_options = b.addOptions();
+    test_options.addOption(bool, "graphics_enabled", false);
+    native_test_module.addOptions("build_options", test_options);
     const native_tests = b.addTest(.{
         .root_module = native_test_module,
         .use_llvm = if (coverage) true else null,
@@ -152,6 +175,15 @@ pub fn build(b: *std.Build) void {
         },
     });
     test_step.dependOn(&b.addRunArtifact(virtio_tests).step);
+    const virtio_gpu_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/platform/qemu_virt/virtio_gpu.zig"),
+            .target = b.graph.host,
+            .optimize = if (coverage) .Debug else optimize,
+        }),
+        .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
+    });
+    test_step.dependOn(&b.addRunArtifact(virtio_gpu_tests).step);
     if (coverage) {
         const remove_coverage_dirs = b.addSystemCommand(&.{
             "rm",
@@ -251,7 +283,10 @@ fn addKernel(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     platform: std.Build.LazyPath,
+    graphics_enabled: bool,
 ) *std.Build.Step.Compile {
+    const options = b.addOptions();
+    options.addOption(bool, "graphics_enabled", graphics_enabled);
     const kernel = b.addExecutable(.{
         .name = name,
         .root_module = b.createModule(.{
@@ -274,6 +309,7 @@ fn addKernel(
         }),
     });
     kernel.entry = .{ .symbol_name = "_start" };
+    kernel.root_module.addOptions("build_options", options);
     kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/boot.S"));
     kernel.root_module.addAssemblyFile(b.path("src/arch/aarch64/vectors.S"));
     return kernel;

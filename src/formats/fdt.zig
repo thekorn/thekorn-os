@@ -10,6 +10,8 @@ pub const Info = struct {
     ram_count: usize = 0,
     reservations: [max_ranges]Range = undefined,
     reservation_count: usize = 0,
+    virtio_mmio: [max_ranges]Range = undefined,
+    virtio_mmio_count: usize = 0,
 };
 
 pub const ParseError = error{
@@ -66,6 +68,17 @@ fn startsWith(bytes: []const u8, prefix: []const u8) bool {
     return true;
 }
 
+fn containsString(bytes: []const u8, expected: []const u8) bool {
+    var start: usize = 0;
+    while (start < bytes.len) {
+        var end = start;
+        while (end < bytes.len and bytes[end] != 0) : (end += 1) {}
+        if (equal(bytes[start..end], expected)) return true;
+        start = end + 1;
+    }
+    return false;
+}
+
 pub fn parse(bytes: []const u8) ParseError!Info {
     if (bytes.len < 40) return error.Truncated;
     if (try be32(bytes, 0) != magic) return error.BadMagic;
@@ -101,9 +114,14 @@ pub fn parse(bytes: []const u8) ParseError!Info {
         memory: u32,
         reserved_child: u32,
         reserved_parent: u32,
-        padding: u32,
+        virtio_mmio: u32,
     };
     var stack: [32]Node align(8) = undefined;
+    var reg_address_low: [32]u32 align(16) = undefined;
+    var reg_address_high: [32]u32 align(16) = undefined;
+    var reg_size_low: [32]u32 align(16) = undefined;
+    var reg_size_high: [32]u32 align(16) = undefined;
+    var has_reg: [32]u32 align(16) = undefined;
     var depth: usize = 0;
     var off = structure;
     const structure_end = structure + structure_size;
@@ -121,20 +139,35 @@ pub fn parse(bytes: []const u8) ParseError!Info {
                 const reg_address_cells: u32 = if (depth == 0) 2 else stack[depth - 1].child_address_cells;
                 const reg_size_cells: u32 = if (depth == 0) 1 else stack[depth - 1].child_size_cells;
                 const reserved_child = depth != 0 and stack[depth - 1].reserved_parent != 0;
-                stack[depth] = .{
-                    .reg_address_cells = reg_address_cells,
-                    .reg_size_cells = reg_size_cells,
-                    .child_address_cells = 2,
-                    .child_size_cells = 1,
-                    .memory = @intFromBool(equal(name, "memory") or startsWith(name, "memory@")),
-                    .reserved_child = @intFromBool(reserved_child),
-                    .reserved_parent = @intFromBool(depth == 1 and equal(name, "reserved-memory")),
-                    .padding = 0,
-                };
+                const node = &stack[depth];
+                node.reg_address_cells = reg_address_cells;
+                node.reg_size_cells = reg_size_cells;
+                node.child_address_cells = 2;
+                node.child_size_cells = 1;
+                node.memory = @intFromBool(equal(name, "memory") or startsWith(name, "memory@"));
+                node.reserved_child = @intFromBool(reserved_child);
+                node.reserved_parent = @intFromBool(depth == 1 and equal(name, "reserved-memory"));
+                node.virtio_mmio = 0;
+                reg_address_low[depth] = 0;
+                reg_address_high[depth] = 0;
+                reg_size_low[depth] = 0;
+                reg_size_high[depth] = 0;
+                has_reg[depth] = 0;
                 depth += 1;
             },
-            2 => if (depth == 0) return error.BadToken else {
+            2 => if (depth == 0) return error.BadToken else end_node: {
+                const node = &stack[depth - 1];
+                if (node.virtio_mmio != 0) {
+                    if (has_reg[depth - 1] == 0) return error.BadProperty;
+                    try appendRange(
+                        &result.virtio_mmio,
+                        &result.virtio_mmio_count,
+                        (@as(u64, reg_address_high[depth - 1]) << 32) | reg_address_low[depth - 1],
+                        (@as(u64, reg_size_high[depth - 1]) << 32) | reg_size_low[depth - 1],
+                    );
+                }
                 depth -= 1;
+                break :end_node;
             },
             3 => {
                 if (depth == 0 or off + 8 > structure_end) return error.BadToken;
@@ -152,6 +185,28 @@ pub fn parse(bytes: []const u8) ParseError!Info {
                 if (equal(name, "#address-cells")) node.child_address_cells = @intCast(try cellsValue(data, 1));
                 if (equal(name, "#size-cells")) node.child_size_cells = @intCast(try cellsValue(data, 1));
                 if (equal(name, "device_type") and startsWith(data, "memory")) node.memory = 1;
+                if (equal(name, "compatible") and containsString(data, "virtio,mmio")) node.virtio_mmio = 1;
+                if (equal(name, "reg") and
+                    node.reg_address_cells >= 1 and node.reg_address_cells <= 2 and
+                    node.reg_size_cells >= 1 and node.reg_size_cells <= 2)
+                {
+                    const tuple_cells = node.reg_address_cells + node.reg_size_cells;
+                    if (data.len >= tuple_cells * 4) {
+                        const address = try cellsValue(
+                            data[0 .. node.reg_address_cells * 4],
+                            node.reg_address_cells,
+                        );
+                        const size = try cellsValue(
+                            data[node.reg_address_cells * 4 .. tuple_cells * 4],
+                            node.reg_size_cells,
+                        );
+                        reg_address_low[depth - 1] = @truncate(address);
+                        reg_address_high[depth - 1] = @truncate(address >> 32);
+                        reg_size_low[depth - 1] = @truncate(size);
+                        reg_size_high[depth - 1] = @truncate(size >> 32);
+                        has_reg[depth - 1] = 1;
+                    }
+                }
                 if (equal(name, "reg") and (node.memory != 0 or node.reserved_child != 0)) {
                     if (node.reg_address_cells < 1 or node.reg_address_cells > 2 or node.reg_size_cells < 1 or node.reg_size_cells > 2) return error.BadCells;
                     const tuple_cells = node.reg_address_cells + node.reg_size_cells;

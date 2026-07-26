@@ -15,6 +15,7 @@ pub const supports_timer_interrupts = true;
 pub const supports_block_device = true;
 pub const gic = @import("gic.zig");
 pub const block = @import("virtio_block.zig");
+pub const gpu = @import("virtio_gpu.zig");
 
 // QEMU VIRT_UART0: guest physical address 0x0900_0000, region size 0x1000.
 const base = 0x0900_0000;

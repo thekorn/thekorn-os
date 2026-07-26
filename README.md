@@ -188,8 +188,9 @@ Then connect an AArch64-capable debugger to `localhost:1234` and load
 `zig-out/bin/thekorn_os`. The ELF retains symbols for `_start`, `kernelMain`,
 and Zig source locations.
 
-The first-graphics work has an opt-in QEMU profile. At the G0 contract stage it
-only attaches a modern MMIO virtio-gpu device; the kernel does not drive it yet:
+The first-graphics work has an opt-in QEMU profile. It builds a separate
+graphics-enabled kernel, attaches a modern MMIO virtio-gpu device, renders the
+800 × 600 boot scene, and presents it on scanout 0:
 
 ```sh
 nix develop --command zig build run-virt-graphics
@@ -240,8 +241,13 @@ The existing headless `run-virt` and `smoke-virt` profiles remain unchanged.
   DMA queue setup, submission, notification, and bounded completion polling are
   shared by device drivers; synthetic queue tests cover descriptor reuse and
   the unchanged QEMU storage smoke gate protects the block path
+- Graphics G3: complete — a separately compiled opt-in QEMU kernel initializes
+  the DTB-discovered virtio-gpu 2D device with validated polling responses,
+  retains one contiguous page-backed XRGB8888 resource, selects scanout 0, and
+  transfers and flushes the shared boot scene; failures remain serial-visible
+  and non-fatal
 
-Graphics G3 is the active milestone. The focused
+Graphics G4 is the active milestone. The focused
 [first graphical output plan](docs/graphics-plan.html) tracks the work toward a
 shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
 framebuffer parity while keeping serial diagnostics authoritative. Physical

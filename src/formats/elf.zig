@@ -61,7 +61,7 @@ pub const Image = struct {
 
 pub fn parse(bytes: []const u8) ParseError!Image {
     if (bytes.len < 64) return error.Truncated;
-    if (!std.mem.eql(u8, bytes[0..4], "\x7fELF")) return error.BadMagic;
+    if (bytes[0] != 0x7f or bytes[1] != 'E' or bytes[2] != 'L' or bytes[3] != 'F') return error.BadMagic;
     if (bytes[4] != 2) return error.UnsupportedClass;
     if (bytes[5] != 1 or bytes[6] != 1) return error.UnsupportedEncoding;
     if (try le16(bytes, 16) != 2) return error.UnsupportedType;

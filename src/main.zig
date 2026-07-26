@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const uart = @import("platform");
 const exceptions = @import("arch/aarch64/exceptions.zig");
 const mmu = @import("arch/aarch64/mmu.zig");
@@ -57,6 +58,9 @@ const MmuProbe = enum {
 
 var unexpected_interrupts: usize = 0;
 var frame_bitmap: [256 * 1024]u8 = undefined;
+var physical_allocator: physical_memory.Allocator = undefined;
+var virtio_mmio_bases: [fdt.max_ranges]u64 = undefined;
+var virtio_mmio_count: usize = 0;
 var identity_map: mmu.IdentityMap = .{};
 var high_half_map: mmu.IdentityMap = .{};
 var expected_mmu_probe: MmuProbe = .none;
@@ -104,6 +108,7 @@ fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c) noreturn {
         if (builtin.is_test) 0 else @intFromPtr(&__kernel_end),
     );
     initializeMemory(dtb);
+    if (comptime build_options.graphics_enabled) initializeGraphics();
     if (builtin.cpu.arch == .aarch64) initializeMmu();
     continueBoot();
 }
@@ -345,6 +350,36 @@ fn initializeMemory(dtb_address: usize) void {
     if (allocated == 0) memoryFailed();
     KernelConsole.writeHex("MEMORY:ALLOCATED=", allocated);
     KernelConsole.write("MEMORY:OK\n");
+
+    // Restore the same reserved state after preserving the exhaustive sweep
+    // evidence, so early device drivers can retain page-backed DMA memory.
+    physical_allocator = physical_memory.Allocator.init(&frame_bitmap, info.ram[0..info.ram_count]) catch memoryFailed();
+    for (info.reservations[0..info.reservation_count]) |range| physical_allocator.reserve(range) catch memoryFailed();
+    physical_allocator.reserve(.{ .address = dtb_address, .size = total_size }) catch memoryFailed();
+    physical_allocator.reserve(.{ .address = kernel_start, .size = kernel_end - kernel_start }) catch memoryFailed();
+    virtio_mmio_count = info.virtio_mmio_count;
+    for (info.virtio_mmio[0..info.virtio_mmio_count], 0..) |range, index| {
+        virtio_mmio_bases[index] = range.address;
+    }
+}
+
+fn initializeGraphics() void {
+    KernelConsole.write(boot_scene.markers.init ++ "\n");
+    const surface = uart.gpu.initialize(&physical_allocator, virtio_mmio_bases[0..virtio_mmio_count]) catch {
+        KernelConsole.write(boot_scene.markers.failed ++ "\n");
+        return;
+    };
+    const display = framebuffer.Framebuffer{ .bytes = surface.bytes, .width = framebuffer.preferred_width, .height = framebuffer.preferred_height, .pitch = framebuffer.preferred_width * 4, .format = .xrgb8888 };
+    const renderer = framebuffer.Renderer.init(display) catch {
+        KernelConsole.write(boot_scene.markers.failed ++ "\n");
+        return;
+    };
+    boot_scene.render(renderer);
+    surface.presentFn(0, 0, display.width, display.height) catch {
+        KernelConsole.write(boot_scene.markers.failed ++ "\n");
+        return;
+    };
+    KernelConsole.write(boot_scene.markers.qemu_ok ++ "\n");
 }
 
 fn initializeMmu() noreturn {
