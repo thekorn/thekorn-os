@@ -114,6 +114,17 @@ QEMU 11 attaches its emulated SD card to the legacy Pi controller rather than
 BCM2711 EMMC2. This smoke test therefore expects a clean `STORAGE:FAILED` after
 the initramfs gate; physical hardware remains the complete Pi storage gate.
 
+After writing the generated image to a card and connecting a 3.3 V serial
+adapter, validate the complete physical-hardware marker contract with:
+
+```sh
+nix develop --command bash scripts/smoke-rpi4-serial.sh /dev/ttyUSB0
+```
+
+Pass an optional transcript path and timeout in seconds as the second and third
+arguments. The script configures `115200 8N1` and captures serial only; card
+selection, flashing, and Pi power control remain manual.
+
 Run host-native tests:
 
 ```sh

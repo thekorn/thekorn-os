@@ -483,9 +483,9 @@
                 <tr><td>Produce Pi raw kernel</td><td><code>zig-out/kernel8.img</code>, linked at <code>0x80000</code></td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Produce flashable card image</td><td><code>zig-out/thekorn-os-rpi4.img</code></td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Test portable path</td><td><code>zig build smoke-virt</code> on QEMU <code>virt</code></td><td><span class="status ready">Available</span></td></tr>
-                <tr><td>Run Pi hardware devices</td><td><code>src/platform/rpi4/</code> with GPIO and PL011</td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Run Pi hardware devices</td><td><code>src/platform/rpi4/</code> with PL011, GIC-400, and EMMC2</td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Prepare card</td><td>Raspberry Pi Imager or equivalent image writer</td><td><span class="status manual">Manual by design</span></td></tr>
-                <tr><td>Capture serial</td><td><code>minicom</code> or PuTTY</td><td><span class="status manual">Host-provided</span></td></tr>
+                <tr><td>Validate physical serial</td><td><code>scripts/smoke-rpi4-serial.sh</code></td><td><span class="status ready">Available</span></td></tr>
               </tbody>
             </table>
           </div>
@@ -501,7 +501,7 @@ ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
 
         <section id="create">
           <div class="section-heading"><span class="section-number">03</span><h2>Understand what the Pi image contains</h2></div>
-          <p class="section-intro">The image implements the smallest useful hardware checkpoint: boot → PL011 output → deliberate exception → resume → halt. Storage drivers, USB, HDMI, and networking remain outside this checkpoint.</p>
+          <p class="section-intro">The image implements the complete v0 hardware checkpoint: boot → protected high-half kernel → GIC/timer preemption → read-only EMMC2/FAT → two isolated EL0 processes → halt. USB, HDMI, networking, and writable storage remain outside this checkpoint.</p>
 
           <div class="steps">
             <article class="step">
@@ -514,11 +514,11 @@ ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
             </article>
             <article class="step">
               <span class="step-number">3</span>
-              <div><h3>Defer the device tree explicitly</h3><p>This checkpoint does not parse a Device Tree Blob, so its minimal configuration disables DTB loading and the reported pointer is zero. The entry path still preserves <code>x0</code> so a later phase can restore DTB loading and discover RAM and reserved regions.</p></div>
+              <div><h3>Consume the firmware device tree</h3><p>The entry path preserves <code>x0</code>; the kernel parses the firmware DTB to discover RAM and reserved regions before enabling protected high-half mappings.</p></div>
             </article>
             <article class="step">
               <span class="step-number">4</span>
-              <div><h3>Build a reproducible card image</h3><p>The image includes a pinned Raspberry Pi firmware release, <code>config.txt</code>, <code>kernel8.img</code>, the Broadcom license, and a firmware release manifest.</p></div>
+              <div><h3>Build a reproducible card image</h3><p>The image includes a pinned Raspberry Pi firmware release, <code>config.txt</code>, <code>kernel8.img</code>, the BCM2711 DTB, a firmware release manifest, and a second FAT16 partition containing both user programs.</p></div>
             </article>
             <article class="step">
               <span class="step-number">5</span>
