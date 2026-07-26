@@ -3,11 +3,12 @@ set -euo pipefail
 
 kernel=${1:?usage: smoke-raspi4b.sh KERNEL_IMAGE CARD_IMAGE}
 card=${2:?usage: smoke-raspi4b.sh KERNEL_IMAGE CARD_IMAGE}
-working_card=$(mktemp)
-dtb=$(mktemp)
-transcript=$(mktemp)
-qemu_log=$(mktemp)
-trap 'rm -f "$working_card" "$dtb" "$transcript" "$qemu_log"' EXIT
+temp_dir=$(mktemp -d)
+working_card="$temp_dir/card.img"
+dtb="$temp_dir/bcm2711-rpi-4-b.dtb"
+transcript="$temp_dir/transcript"
+qemu_log="$temp_dir/qemu.log"
+trap 'rm -rf "$temp_dir"' EXIT
 
 # QEMU does not emulate the VideoCore boot firmware, so direct boot uses the
 # kernel and DTB stored in the generated card image. QEMU 11 also attaches
