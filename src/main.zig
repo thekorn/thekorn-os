@@ -432,9 +432,11 @@ fn initializeMmu() noreturn {
 
 fn verifyV1Lifecycle() void {
     var table: process.ProcessTable = .{};
+    kernel_scheduler.init(0, 0, 0);
     const init_pid = table.spawn(null) catch mmuFailed();
     const initial_frames = physical_allocator.freeFrameCount();
     const initial_slots = table.usedSlots();
+    const initial_task_slots = kernel_scheduler.usedSlots();
     const required_frames = process.requiredFrameCount(&embedded_users.one) catch mmuFailed();
     for (0..128) |cycle| {
         const child = table.spawnFromBytes(
@@ -442,6 +444,7 @@ fn verifyV1Lifecycle() void {
             &embedded_users.one,
             &physical_allocator,
         ) catch mmuFailed();
+        const task = kernel_scheduler.allocateTask(0, 0) catch mmuFailed();
         if (table.entry(child) catch mmuFailed() != process.image_address) mmuFailed();
         if (table.ownedFrameCount(child) catch mmuFailed() != required_frames or
             physical_allocator.freeFrameCount() != initial_frames - required_frames or
@@ -467,13 +470,15 @@ fn verifyV1Lifecycle() void {
             mmuFailed();
         }
         const reaped = table.reap(init_pid, child, &physical_allocator) catch mmuFailed();
+        kernel_scheduler.cancel(task);
         if (reaped.pid != waited.pid or reaped.status.disposition != waited.status.disposition or
             reaped.status.code != waited.status.code)
         {
             mmuFailed();
         }
         if (physical_allocator.freeFrameCount() != initial_frames or
-            table.usedSlots() != initial_slots)
+            table.usedSlots() != initial_slots or
+            kernel_scheduler.usedSlots() != initial_task_slots)
         {
             mmuFailed();
         }

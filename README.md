@@ -257,10 +257,12 @@ mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
   queues provide IRQ-masked wait/wake/cancel transitions, monotonic deadlines
   use wrap-safe comparisons, and an idle task executes `wfi` when every normal
   task is blocked
-- V1.2: active — a 16-slot process table separates monotonic PIDs from reusable
-  slots, tracks parentage and owned frames, adopts orphans, retains zombie
-  status for wait-one or wait-any, and reclaims frames and slots during reap;
-  host tests prove resource equality over 128 mixed exit and fault cycles
+- V1.2: complete — a 16-slot process table separates monotonic PIDs from
+  reusable process and task slots, tracks parentage and owned frames, adopts
+  orphans, and retains zombie status for wait-one or wait-any; the QEMU v1 gate
+  loads allocator-backed ELF and translation-table pages for 128 mixed normal
+  and fault-status cycles, then proves exact frame, task-slot, and process-slot
+  equality
 
 - Phase 0: complete — freestanding build, linker layout, boot assembly, ELF,
   raw image, QEMU run/debug steps

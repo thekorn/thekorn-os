@@ -3,9 +3,10 @@ const builtin = @import("builtin");
 const exceptions = @import("../arch/aarch64/exceptions.zig");
 
 pub const task_count = 3;
+pub const capacity = 16;
 pub const stack_size = 16 * 1024;
-const idle_task = task_count;
-const slot_count = task_count + 1;
+const idle_task = capacity;
+const slot_count = capacity + 1;
 
 pub const State = enum {
     free,
@@ -30,7 +31,7 @@ pub const DispatchError = error{
 const task_stack = [stack_size]u8;
 
 pub const WaitQueue = struct {
-    tasks: [task_count]usize = undefined,
+    tasks: [capacity]usize = undefined,
     count: usize = 0,
     pending_wake: bool = false,
 
@@ -51,21 +52,23 @@ pub const Scheduler = struct {
     current: ?usize = null,
     cooperative_switch_count: usize = 0,
     preemption_count: usize = 0,
-    preemptive_dispatch_counts: [task_count]usize = @splat(0),
+    preemptive_dispatch_counts: [capacity]usize = @splat(0),
     states: [slot_count]State = @splat(.free),
-    wait_queues: [task_count]?*WaitQueue = @splat(null),
-    deadlines: [task_count]usize = @splat(0),
-    round_robin_cursor: usize = task_count - 1,
+    wait_queues: [capacity]?*WaitQueue = @splat(null),
+    deadlines: [capacity]usize = @splat(0),
+    round_robin_cursor: usize = capacity - 1,
 
     pub fn init(self: *Scheduler, entry: u64, idle_entry: u64, spsr: u64) void {
         self.current = null;
         self.cooperative_switch_count = 0;
         self.preemption_count = 0;
         self.preemptive_dispatch_counts = @splat(0);
-        self.states = @splat(.runnable);
+        self.states = @splat(.free);
+        for (self.states[0..task_count]) |*task_state| task_state.* = .runnable;
+        self.states[idle_task] = .runnable;
         self.wait_queues = @splat(null);
         self.deadlines = @splat(0);
-        self.round_robin_cursor = task_count - 1;
+        self.round_robin_cursor = capacity - 1;
 
         for (&self.stacks, 0..) |*stack, index| {
             const stack_top = @intFromPtr(stack) + stack_size;
@@ -98,12 +101,12 @@ pub const Scheduler = struct {
         const next = self.nextRunnable(current) orelse return error.NoRunnableTask;
         self.current = next;
         self.states[next] = .running;
-        if (next < task_count) self.round_robin_cursor = next;
+        if (next < capacity) self.round_robin_cursor = next;
         switch (reason) {
             .cooperative => self.cooperative_switch_count += 1,
             .preemptive => {
                 self.preemption_count += 1;
-                if (next < task_count) self.preemptive_dispatch_counts[next] += 1;
+                if (next < capacity) self.preemptive_dispatch_counts[next] += 1;
             },
         }
         return self.frames[next];
@@ -121,7 +124,7 @@ pub const Scheduler = struct {
         const next = self.nextRunnable(current) orelse return error.NoRunnableTask;
         self.current = next;
         self.states[next] = .running;
-        if (next < task_count) self.round_robin_cursor = next;
+        if (next < capacity) self.round_robin_cursor = next;
         return self.frames[next];
     }
 
@@ -147,7 +150,7 @@ pub const Scheduler = struct {
         const next = self.nextRunnable(current) orelse return error.NoRunnableTask;
         self.current = next;
         self.states[next] = .running;
-        if (next < task_count) self.round_robin_cursor = next;
+        if (next < capacity) self.round_robin_cursor = next;
         return self.frames[next];
     }
 
@@ -177,7 +180,7 @@ pub const Scheduler = struct {
     pub fn cancel(self: *Scheduler, task: usize) void {
         const irq_state = disableLocalIrq();
         defer restoreLocalIrq(irq_state);
-        if (task >= task_count) return;
+        if (task >= capacity) return;
         if (self.wait_queues[task]) |queue| {
             _ = queue.remove(task);
             self.wait_queues[task] = null;
@@ -202,20 +205,42 @@ pub const Scheduler = struct {
         const next = self.nextRunnable(current) orelse return error.NoRunnableTask;
         self.current = next;
         self.states[next] = .running;
-        if (next < task_count) self.round_robin_cursor = next;
+        if (next < capacity) self.round_robin_cursor = next;
         return self.frames[next];
     }
 
     pub fn wakeExpired(self: *Scheduler, now: usize) void {
         const irq_state = disableLocalIrq();
         defer restoreLocalIrq(irq_state);
-        for (self.states[0..task_count], self.deadlines[0..task_count]) |*task_state, deadline| {
+        for (self.states[0..capacity], self.deadlines[0..capacity]) |*task_state, deadline| {
             if (task_state.* == .sleeping and deadlineReached(now, deadline)) task_state.* = .runnable;
         }
     }
 
     pub fn state(self: *const Scheduler, task: usize) State {
         return self.states[task];
+    }
+
+    pub fn allocateTask(self: *Scheduler, entry: u64, spsr: u64) error{TaskTableFull}!usize {
+        for (self.states[0..capacity], 0..) |*task_state, task| {
+            if (task_state.* != .free) continue;
+            const frame = self.frames[task];
+            frame.* = std.mem.zeroes(exceptions.Frame);
+            frame.registers[0] = task;
+            frame.elr = entry;
+            frame.spsr = spsr;
+            task_state.* = .runnable;
+            return task;
+        }
+        return error.TaskTableFull;
+    }
+
+    pub fn usedSlots(self: *const Scheduler) usize {
+        var count_used: usize = 0;
+        for (self.states[0..capacity]) |task_state| {
+            if (task_state != .free) count_used += 1;
+        }
+        return count_used;
     }
 
     pub fn currentTask(self: *const Scheduler) ?usize {
@@ -235,8 +260,8 @@ pub const Scheduler = struct {
     }
 
     fn nextRunnable(self: *const Scheduler, _: usize) ?usize {
-        for (1..task_count + 1) |distance| {
-            const candidate = (self.round_robin_cursor + distance) % task_count;
+        for (1..capacity + 1) |distance| {
+            const candidate = (self.round_robin_cursor + distance) % capacity;
             if (self.states[candidate] == .runnable) return candidate;
         }
         if (self.states[idle_task] == .runnable) return idle_task;
@@ -402,4 +427,24 @@ test "idle preserves round-robin order after all waiters wake" {
     scheduler.wakeAll(&queue);
     frame = try scheduler.dispatch(frame, .cooperative);
     try std.testing.expectEqual(@as(u64, 0), frame.registers[0]);
+}
+
+test "task slots are reusable at fixed capacity" {
+    var scheduler: Scheduler = .{};
+    scheduler.init(0x1000, 0x2000, 0x345);
+    const baseline = scheduler.usedSlots();
+    try std.testing.expectEqual(task_count, baseline);
+
+    for (0..128) |_| {
+        const task = try scheduler.allocateTask(0x3000, 0x345);
+        try std.testing.expectEqual(baseline + 1, scheduler.usedSlots());
+        scheduler.cancel(task);
+        try std.testing.expectEqual(baseline, scheduler.usedSlots());
+    }
+
+    var allocated: [capacity - task_count]usize = undefined;
+    for (&allocated) |*task| task.* = try scheduler.allocateTask(0x3000, 0x345);
+    try std.testing.expectError(error.TaskTableFull, scheduler.allocateTask(0x3000, 0x345));
+    for (allocated) |task| scheduler.cancel(task);
+    try std.testing.expectEqual(baseline, scheduler.usedSlots());
 }
