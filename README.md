@@ -66,9 +66,24 @@ and debug information in the ELF. It creates:
   FAT32 boot partition, read-only FAT16 user partition, the pinned Raspberry
   Pi firmware release, and the Pi kernel and BCM2711 device tree
 
-Write `zig-out/thekorn-os-rpi4.img` to a spare microSD card with the **Use
-custom** action in Raspberry Pi Imager or an equivalent image writer. This
-overwrites the selected card. The build never selects or writes a device automatically.
+Write `zig-out/thekorn-os-rpi4.img` to a spare microSD card from the command
+line with:
+
+```sh
+nix develop --command bash scripts/flash-rpi4-sd.sh DEVICE
+```
+
+Use the whole removable disk as `DEVICE`, not one of its partitions. On macOS,
+find it with `diskutil list` and use a name such as `/dev/disk4`. On Linux, use
+`lsblk -p` and a name such as `/dev/sdb`. Check the device name and size
+carefully: writing the image destroys all existing data on the selected card.
+The script refuses internal, non-removable, and partition devices, displays the
+selected disk, requires an exact interactive confirmation, unmounts it, writes
+the image with `dd`, and verifies the written bytes. It prompts for `sudo` only
+after confirmation. An alternate image can be supplied as the second argument.
+
+Raspberry Pi Imager remains an alternative: select the generated image with
+its **Use custom** action. The build itself never selects or writes a device.
 Connect a 3.3 V serial adapter to GPIO 14/15 at 115200 8N1 before powering the
 Pi. See the [Pi 4 hardware guide](docs/rpi4.html) for wiring and recovery steps.
 
