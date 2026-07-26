@@ -85,6 +85,7 @@ pub fn build(b: *std.Build) void {
     const qemu_image = kernel.addObjCopy(.{ .format = .binary });
     addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", qemu_image.getOutput(), user_disk, false, false);
     addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", qemu_image.getOutput(), user_disk, false, true);
+    addGraphicsQemuStep(b, qemu_image.getOutput(), user_disk);
     addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", qemu_image.getOutput(), user_disk, true, false);
 
     const smoke = b.addSystemCommand(&.{"bash"});
@@ -289,5 +290,25 @@ fn addQemuStep(
     qemu.addFileArg(user_disk);
 
     const step = b.step(name, description);
+    step.dependOn(&qemu.step);
+}
+
+fn addGraphicsQemuStep(
+    b: *std.Build,
+    kernel: std.Build.LazyPath,
+    user_disk: std.Build.LazyPath,
+) void {
+    const qemu = b.addSystemCommand(&.{ "bash", "-c" });
+    qemu.addArg(
+        \\exec qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 1 -m 128M -monitor none -serial vc:2048x1536 -global virtio-mmio.force-legacy=false -kernel "$1" -drive "file=$2,format=raw,if=none,readonly=on,id=users" -device virtio-blk-device,drive=users -device virtio-gpu-device
+    );
+    qemu.addArg("run-virt-graphics");
+    qemu.addFileArg(kernel);
+    qemu.addFileArg(user_disk);
+
+    const step = b.step(
+        "run-virt-graphics",
+        "Run the kernel with the opt-in QEMU virtio-gpu device",
+    );
     step.dependOn(&qemu.step);
 }

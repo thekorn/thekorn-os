@@ -188,6 +188,15 @@ Then connect an AArch64-capable debugger to `localhost:1234` and load
 `zig-out/bin/thekorn_os`. The ELF retains symbols for `_start`, `kernelMain`,
 and Zig source locations.
 
+The first-graphics work has an opt-in QEMU profile. At the G0 contract stage it
+only attaches a modern MMIO virtio-gpu device; the kernel does not drive it yet:
+
+```sh
+nix develop --command zig build run-virt-graphics
+```
+
+The existing headless `run-virt` and `smoke-virt` profiles remain unchanged.
+
 ## Project status
 
 - Phase 0: complete — freestanding build, linker layout, boot assembly, ELF,
@@ -219,9 +228,13 @@ and Zig source locations.
   generic physical timer, reads its FAT16 user partition through a polling
   EMMC2 driver, and feeds the existing preemptive two-process demo; complete
   physical-board validation remains
+- Graphics G0: complete — the fixed 800 × 600 XRGB8888 scene/display contract,
+  serial outcome markers, and opt-in QEMU virtio-gpu run profile are
+  host-testable; device initialization and all physical-hardware evidence are
+  deferred to later graphics gates
 
-The next milestone is intentionally open for selection. In addition to the
-[proposed v1 interactive-system plan](docs/v1-plan.html), see the focused
-[first graphical output plan](docs/graphics-plan.html) for a smaller path that
-adds a shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4
-HDMI framebuffer parity while keeping serial diagnostics authoritative.
+Graphics G1 is the active milestone. The focused
+[first graphical output plan](docs/graphics-plan.html) tracks the work toward a
+shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
+framebuffer parity while keeping serial diagnostics authoritative. Physical
+hardware verification gates are intentionally deferred.

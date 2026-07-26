@@ -10,6 +10,8 @@ const elf = @import("formats/elf.zig");
 const fat = @import("formats/fat.zig");
 const fdt = @import("formats/fdt.zig");
 const block_device = @import("kernel/block_device.zig");
+const boot_scene = @import("kernel/boot_scene.zig");
+const framebuffer = @import("kernel/framebuffer.zig");
 const physical_memory = @import("kernel/physical_memory.zig");
 const process = @import("kernel/process.zig");
 const scheduler = @import("kernel/scheduler.zig");
@@ -38,6 +40,11 @@ const translation_fault_first = 0x04;
 const translation_fault_last = 0x07;
 const permission_fault_level_three = 0x0f;
 const user_image_names = [process.count][]const u8{ "USER1.ELF", "USER2.ELF" };
+
+comptime {
+    _ = boot_scene;
+    _ = framebuffer;
+}
 
 const MmuProbe = enum {
     none,
