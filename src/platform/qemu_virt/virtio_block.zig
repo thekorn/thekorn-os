@@ -7,6 +7,7 @@ const magic_value = 0x7472_6976;
 const modern_version = 2;
 const block_device_id = 2;
 pub const sector_size = 512;
+pub const ready_marker = "VIRTIO_BLK:OK\n";
 const queue_size = 8;
 const poll_limit = 10_000_000;
 

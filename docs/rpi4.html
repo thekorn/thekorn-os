@@ -534,7 +534,7 @@ ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
 
         <section id="card">
           <div class="section-heading"><span class="section-number">04</span><h2>Prepare a recoverable microSD card</h2></div>
-          <p class="section-intro">Build once, then write the generated image as a whole. You do not need to partition the card or collect firmware files manually.</p>
+          <p class="section-intro">Build once, then write the generated image as a whole. It contains a FAT32 firmware partition and a read-only FAT16 user-program partition; you do not need to partition the card or collect firmware files manually.</p>
 
           <div class="steps">
             <article class="step">
@@ -563,12 +563,11 @@ arm_64bit=1
 kernel=kernel8.img
 enable_uart=1
 init_uart_clock=48000000
-device_tree=
 
 [all]</code></pre>
                   <button class="copy-button" type="button" aria-label="Copy config.txt">Copy</button>
                 </div>
-                <p><code>device_tree=</code> disables a hand-off the kernel does not parse yet. The Pi backend routes PL011 directly to GPIO 14/15, and <code>init_uart_clock</code> fixes the clock used by its baud divisors. <code>cmdline.txt</code> is not needed.</p>
+                <p>The firmware passes the bundled BCM2711 device tree to the kernel for RAM and reservation discovery. The Pi backend routes PL011 directly to GPIO 14/15, and <code>init_uart_clock</code> fixes the clock used by its baud divisors. <code>cmdline.txt</code> is not needed.</p>
               </div>
             </article>
             <article class="step">
@@ -586,6 +585,7 @@ device_tree=
                 <li><code>config.txt</code> — firmware configuration.</li>
                 <li><code>kernel8.img</code> — thekorn-os raw AArch64 kernel image.</li>
               </ul>
+              <p>A second FAT16 partition contains the two user ELF images. The kernel accesses it read-only through BCM2711 EMMC2; firmware continues to use the first partition.</p>
               <p>The Pi 4's EEPROM bootloader loads <code>start4.elf</code> from a bootable FAT partition. Unlike older boards, it does not need <code>bootcode.bin</code> for ordinary SD boot.</p>
             </div>
           </details>
@@ -769,10 +769,14 @@ EXCEPTION:VECTOR=0x...
 EXCEPTION:EC=0x000000000000003c
 EXCEPTION:BRK
 EXCEPTION:RETURNED
+EMMC2:OK
+FAT:OK
+IRQ:OK
+PROCESS:ISOLATION_OK
 BOOT:OK</code></pre>
           </div>
 
-          <p>At the current checkpoint the kernel halts in a <code>wfe</code> loop after <code>BOOT:OK</code>. There is no login prompt, shell, filesystem, networking, or shutdown command. Because the kernel does not write storage, removing USB-C power after it halts is acceptable for this bring-up stage.</p>
+          <p>The Phase 10 path is implemented but not yet verified on hardware. A successful run loads both processes from initramfs and the read-only FAT16 partition, exercises timer preemption and isolation, then halts in a <code>wfe</code> loop after <code>BOOT:OK</code>. There is no login prompt, shell, writable filesystem, networking, or shutdown command. Because the kernel does not write storage, removing USB-C power after it halts is acceptable.</p>
         </section>
 
         <section id="troubleshoot">

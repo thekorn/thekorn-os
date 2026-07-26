@@ -54,6 +54,9 @@ _start:
     // HCR_EL2.RW selects AArch64 for EL1. EL1h uses SP_EL1.
     mov x0, #(1 << 31)
     msr HCR_EL2, x0
+    // Permit EL1 to access the physical counter and physical timer.
+    mov x0, #3
+    msr CNTHCTL_EL2, x0
     msr SP_EL1, x1
     adr x0, .Lentered_el1
     msr ELR_EL2, x0

@@ -401,7 +401,7 @@ fn loadProcessesFromFat() void {
     const archive = cpio.Archive.init(&embedded_users.initramfs);
 
     KernelConsole.writeHex("BLOCK:SECTORS=", device.block_count);
-    KernelConsole.write("VIRTIO_BLK:OK\n");
+    KernelConsole.write(uart.block.ready_marker);
     for (&processes, user_image_names) |*item, name| {
         const bytes = file_system.readFile(name, &storage_file_buffer) catch storageFailed();
         const initramfs_bytes = (archive.find(name) catch storageFailed()) orelse storageFailed();

@@ -57,11 +57,11 @@ and debug information in the ELF. It creates:
 
 - `zig-out/bin/thekorn_os` — symbol-rich QEMU `virt` ELF linked at `0x40080000`
 - `zig-out/users-fat16.img` — deterministic, read-only FAT16 image containing
-  both Zig user programs for the QEMU virtio block device
+  both Zig user programs for the QEMU virtio block device and Pi card image
 - `zig-out/kernel8.img` — raw Raspberry Pi 4 kernel linked at `0x80000`
 - `zig-out/thekorn-os-rpi4.img` — 64 MiB Pi-ready SD-card image with an MBR,
-  FAT32 boot partition, the pinned Raspberry Pi firmware release, and the Pi
-  kernel and BCM2711 device tree
+  FAT32 boot partition, read-only FAT16 user partition, the pinned Raspberry
+  Pi firmware release, and the Pi kernel and BCM2711 device tree
 
 Write `zig-out/thekorn-os-rpi4.img` to a spare microSD card with the **Use
 custom** action in Raspberry Pi Imager or an equivalent image writer. This
@@ -192,5 +192,6 @@ and Zig source locations.
   polling modern virtio-mmio block driver, a read-only block-device contract,
   and host-tested FAT16/32 parsing feed the isolated two-process smoke gate
 - Phase 10: in progress — the Pi 4 BSP configures the BCM2711 GIC-400 and Arm
-  generic physical timer for the existing preemptive two-process initramfs
-  demo; physical-board validation and SD/eMMC storage remain
+  generic physical timer, reads its FAT16 user partition through a polling
+  EMMC2 driver, and feeds the existing preemptive two-process demo; physical-
+  board validation remains

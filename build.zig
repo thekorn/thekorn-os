@@ -73,6 +73,7 @@ pub fn build(b: *std.Build) void {
     rpi_dtb.addFileArg(b.path("scripts/fetch-rpi4-dtb.py"));
     const rpi_dtb_output = rpi_dtb.addOutputFileArg("bcm2711-rpi-4-b.dtb");
     rpi_disk.addFileArg(rpi_dtb_output);
+    rpi_disk.addFileArg(user_disk);
     rpi_disk.addArg("1.20260521");
     const rpi_disk_output = rpi_disk.addOutputFileArg("thekorn-os-rpi4.img");
     const install_rpi_disk = b.addInstallFile(rpi_disk_output, "thekorn-os-rpi4.img");
@@ -116,6 +117,18 @@ pub fn build(b: *std.Build) void {
         },
     });
     const test_step = b.step("test", "Run tests");
+    const rpi_block_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/platform/rpi4/emmc.zig"),
+            .target = b.graph.host,
+            .optimize = if (coverage) .Debug else optimize,
+        }),
+        .test_runner = .{
+            .path = b.path("src/test_runner.zig"),
+            .mode = .simple,
+        },
+    });
+    test_step.dependOn(&b.addRunArtifact(rpi_block_tests).step);
     if (coverage) {
         const remove_coverage_dirs = b.addSystemCommand(&.{
             "rm",
