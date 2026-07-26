@@ -194,6 +194,8 @@ pub const LifecycleError = physical_memory.FreeError || error{
     OutOfMemory,
 };
 
+pub const SpawnError = LifecycleError || LoadError;
+
 const LifecycleState = enum {
     free,
     alive,
@@ -207,6 +209,9 @@ const Record = struct {
     status: ExitStatus = .{ .disposition = .exited, .code = 0 },
     frames: [max_owned_frames]u64 = undefined,
     frame_count: usize = 0,
+    address_space: ?mmu.FrameMap = null,
+    entry: u64 = 0,
+    stack_pointer: u64 = 0,
 };
 
 pub const ProcessTable = struct {
@@ -242,6 +247,104 @@ pub const ProcessTable = struct {
         record.frames[record.frame_count] = frame;
         record.frame_count += 1;
         return frame;
+    }
+
+    pub fn spawnFromBytes(
+        self: *ProcessTable,
+        parent: Pid,
+        bytes: []const u8,
+        allocator: *physical_memory.Allocator,
+    ) SpawnError!Pid {
+        const pid = try self.spawn(parent);
+        errdefer self.discard(pid, allocator);
+        const record = self.find(pid).?;
+        var table_frames: [4]u64 = undefined;
+        for (&table_frames) |*frame| frame.* = try self.allocateOwnedFrame(pid, allocator);
+        record.address_space = try mmu.FrameMap.init(table_frames);
+        const address_space = &record.address_space.?;
+        const image = try elf.parse(bytes);
+        var entry_is_executable = false;
+        var loaded_segments: [elf.max_program_headers]elf.Segment = undefined;
+        var loaded_segment_count: usize = 0;
+        for (0..image.program_header_count) |index| {
+            const segment = try image.segment(index);
+            if (segment.segment_type != elf.load_segment or segment.memory_size == 0) continue;
+            const mapping: mmu.Mapping = switch (segment.flags) {
+                elf.flag_read | elf.flag_execute => .user_read_execute,
+                elf.flag_read => .user_read_only,
+                elf.flag_read | elf.flag_write => .user_read_write,
+                else => return error.UnsupportedPermissions,
+            };
+            if (segment.virtual_address % mmu.page_size != 0 or
+                segment.memory_size % mmu.page_size != 0 or
+                segment.alignment < mmu.page_size or
+                !std.math.isPowerOfTwo(segment.alignment) or
+                segment.virtual_address % segment.alignment != segment.file_offset % segment.alignment)
+            {
+                return error.InvalidSegment;
+            }
+            if (segment.virtual_address < image_address or
+                segment.virtual_address - image_address > image_size or
+                segment.memory_size > image_size - (segment.virtual_address - image_address))
+            {
+                return error.SegmentOutsideWindow;
+            }
+            for (loaded_segments[0..loaded_segment_count]) |loaded| {
+                if (segment.virtual_address < loaded.virtual_address + loaded.memory_size and
+                    loaded.virtual_address < segment.virtual_address + segment.memory_size)
+                {
+                    return error.InvalidSegment;
+                }
+            }
+            const file_offset: usize = @intCast(segment.file_offset);
+            const file_size: usize = @intCast(segment.file_size);
+            const page_count: usize = @intCast(segment.memory_size / mmu.page_size);
+            for (0..page_count) |page| {
+                const frame = try self.allocateOwnedFrame(pid, allocator);
+                const destination: [*]u8 = @ptrFromInt(frame);
+                @memset(destination[0..mmu.page_size], 0);
+                const source_offset = page * mmu.page_size;
+                if (source_offset < file_size) {
+                    const copy_size = @min(mmu.page_size, file_size - source_offset);
+                    @memcpy(
+                        destination[0..copy_size],
+                        bytes[file_offset + source_offset ..][0..copy_size],
+                    );
+                }
+                try address_space.mapAt(
+                    segment.virtual_address + page * mmu.page_size,
+                    frame,
+                    mmu.page_size,
+                    mapping,
+                );
+            }
+            if (mapping == .user_read_execute and
+                image.entry >= segment.virtual_address and
+                image.entry < segment.virtual_address + segment.memory_size)
+            {
+                entry_is_executable = true;
+            }
+            loaded_segments[loaded_segment_count] = segment;
+            loaded_segment_count += 1;
+        }
+        if (loaded_segment_count == 0 or !entry_is_executable) return error.InvalidEntry;
+
+        const data_frame = try self.allocateOwnedFrame(pid, allocator);
+        @memset(@as([*]u8, @ptrFromInt(data_frame))[0..mmu.page_size], 0);
+        try address_space.mapAt(data_address, data_frame, mmu.page_size, .user_read_write);
+        for (0..stack_pages) |page| {
+            const frame = try self.allocateOwnedFrame(pid, allocator);
+            @memset(@as([*]u8, @ptrFromInt(frame))[0..mmu.page_size], 0);
+            try address_space.mapAt(
+                stack_address + page * mmu.page_size,
+                frame,
+                mmu.page_size,
+                .user_read_write,
+            );
+        }
+        record.entry = image.entry;
+        record.stack_pointer = stack_address + stack_pages * mmu.page_size;
+        return pid;
     }
 
     pub fn exit(self: *ProcessTable, pid: Pid, status: ExitStatus) LifecycleError!void {
@@ -286,6 +389,7 @@ pub const ProcessTable = struct {
     ) LifecycleError!WaitResult {
         const result = try self.waitOne(parent, child);
         const record = self.find(child).?;
+        if (record.address_space) |*address_space| address_space.clear();
         while (record.frame_count != 0) {
             const index = record.frame_count - 1;
             try allocator.free(record.frames[index]);
@@ -293,6 +397,29 @@ pub const ProcessTable = struct {
         }
         record.* = .{};
         return result;
+    }
+
+    pub fn rootAddress(self: *ProcessTable, pid: Pid) LifecycleError!u64 {
+        const record = self.find(pid) orelse return error.NoSuchProcess;
+        const address_space = record.address_space orelse return error.NoSuchProcess;
+        return address_space.rootAddress();
+    }
+
+    pub fn entry(self: *ProcessTable, pid: Pid) LifecycleError!u64 {
+        const record = self.find(pid) orelse return error.NoSuchProcess;
+        if (record.address_space == null) return error.NoSuchProcess;
+        return record.entry;
+    }
+
+    pub fn ownedFrameCount(self: *ProcessTable, pid: Pid) LifecycleError!usize {
+        const record = self.find(pid) orelse return error.NoSuchProcess;
+        return record.frame_count;
+    }
+
+    pub fn descriptor(self: *ProcessTable, pid: Pid, address: u64) LifecycleError!?u64 {
+        const record = self.find(pid) orelse return error.NoSuchProcess;
+        const address_space = record.address_space orelse return error.NoSuchProcess;
+        return address_space.descriptor(address);
     }
 
     pub fn usedSlots(self: *const ProcessTable) usize {
@@ -314,7 +441,36 @@ pub const ProcessTable = struct {
         }
         return null;
     }
+
+    fn discard(
+        self: *ProcessTable,
+        pid: Pid,
+        allocator: *physical_memory.Allocator,
+    ) void {
+        const record = self.find(pid) orelse return;
+        if (record.address_space) |*address_space| address_space.clear();
+        while (record.frame_count != 0) {
+            record.frame_count -= 1;
+            allocator.free(record.frames[record.frame_count]) catch unreachable;
+        }
+        if (self.init_pid == pid) self.init_pid = null;
+        record.* = .{};
+    }
 };
+
+pub fn requiredFrameCount(bytes: []const u8) LoadError!usize {
+    const image = try elf.parse(bytes);
+    var pages: usize = 4 + data_pages + stack_pages;
+    for (0..image.program_header_count) |index| {
+        const segment = try image.segment(index);
+        if (segment.segment_type != elf.load_segment or segment.memory_size == 0) continue;
+        if (segment.memory_size % mmu.page_size != 0) return error.InvalidSegment;
+        pages = std.math.add(usize, pages, @intCast(segment.memory_size / mmu.page_size)) catch
+            return error.InvalidSegment;
+    }
+    if (pages > max_owned_frames) return error.InvalidSegment;
+    return pages;
+}
 
 test "process memory windows are page aligned and disjoint" {
     var processes: [count]Process = @splat(.{});
@@ -408,4 +564,56 @@ test "PID exhaustion leaves slots unchanged" {
     try std.testing.expectError(error.PidExhausted, table.spawn(null));
     try std.testing.expectEqual(@as(usize, 0), table.usedSlots());
     try std.testing.expectEqual(std.math.maxInt(Pid), table.next_pid);
+}
+
+test "failed frame-backed spawn unwinds every allocation" {
+    var ram_storage: [64 * physical_memory.page_size]u8 align(mmu.page_size) = undefined;
+    var bitmap: [8]u8 = undefined;
+    const ram = [_]@import("../formats/fdt.zig").Range{.{
+        .address = @intFromPtr(&ram_storage),
+        .size = ram_storage.len,
+    }};
+    var allocator = try physical_memory.Allocator.init(&bitmap, &ram);
+    var table: ProcessTable = .{};
+    const init_pid = try table.spawn(null);
+    const initial_frames = allocator.freeFrameCount();
+
+    try std.testing.expectError(
+        error.Truncated,
+        table.spawnFromBytes(init_pid, &.{}, &allocator),
+    );
+    try std.testing.expectEqual(initial_frames, allocator.freeFrameCount());
+    try std.testing.expectEqual(@as(usize, 1), table.usedSlots());
+}
+
+test "mapped partial spawn clears table frames before returning them" {
+    const image = &@import("embedded_users").one;
+    const required = try requiredFrameCount(image);
+    var ram_storage: [64 * physical_memory.page_size]u8 align(mmu.page_size) = undefined;
+    var bitmap: [8]u8 = undefined;
+    const base = @intFromPtr(&ram_storage);
+    const ram = [_]@import("../formats/fdt.zig").Range{.{
+        .address = base,
+        .size = ram_storage.len,
+    }};
+    var allocator = try physical_memory.Allocator.init(&bitmap, &ram);
+    const retained_count = 64 - (required - 1);
+    for (0..retained_count) |_| _ = allocator.allocate().?;
+    const first_table = base + retained_count * physical_memory.page_size;
+    var table: ProcessTable = .{};
+    const init_pid = try table.spawn(null);
+    const initial_frames = allocator.freeFrameCount();
+
+    try std.testing.expectError(
+        error.OutOfMemory,
+        table.spawnFromBytes(init_pid, image, &allocator),
+    );
+    try std.testing.expectEqual(initial_frames, allocator.freeFrameCount());
+    try std.testing.expectEqual(@as(usize, 1), table.usedSlots());
+    for (0..4) |page| {
+        const table_bytes: [*]const u8 = @ptrFromInt(first_table + page * physical_memory.page_size);
+        for (table_bytes[0..physical_memory.page_size]) |byte| {
+            try std.testing.expectEqual(@as(u8, 0), byte);
+        }
+    }
 }

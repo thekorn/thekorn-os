@@ -25,10 +25,19 @@ if [[ $status -ne 124 ]]; then
   echo "smoke-v1: expected QEMU to be stopped by the timeout, got status $status" >&2
   exit 1
 fi
-if [[ $(grep -Ec '^V1:INIT' "$transcript" || true) -ne 1 ]]; then
-  echo "smoke-v1: expected V1:INIT exactly once" >&2
-  exit 1
-fi
+previous_line=0
+for marker in 'V1:LIFECYCLE_OK' 'V1:INIT'; do
+  if [[ $(grep -Ec "^${marker}" "$transcript" || true) -ne 1 ]]; then
+    echo "smoke-v1: expected ${marker} exactly once" >&2
+    exit 1
+  fi
+  line=$(grep -En -m1 "^${marker}" "$transcript" | cut -d: -f1)
+  if (( line <= previous_line )); then
+    echo "smoke-v1: marker appeared out of order: ${marker}" >&2
+    exit 1
+  fi
+  previous_line=$line
+done
 if grep -Eq ':(FAILED|UNHANDLED)|^BOOT:OK' "$transcript"; then
   echo "smoke-v1: unexpected v0 or failure marker found" >&2
   exit 1

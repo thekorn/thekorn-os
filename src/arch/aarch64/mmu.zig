@@ -224,6 +224,113 @@ pub const IdentityMap = struct {
     }
 };
 
+/// A minimal address space whose four translation-table pages are supplied by
+/// its owner. It covers one 2 MiB virtual region, which contains every bounded
+/// v1 userspace window, and leaves allocation and reclamation to the process.
+pub const FrameMap = struct {
+    root: *Table,
+    level_one: *Table,
+    level_two: *Table,
+    level_three: *Table,
+    root_physical: u64,
+    root_entry: ?usize = null,
+    level_one_entry: ?usize = null,
+    level_two_entry: ?usize = null,
+
+    pub fn init(table_frames: [4]u64) DescriptorError!FrameMap {
+        for (table_frames) |frame| _ = try encodeOutputAddress(frame);
+        var result = FrameMap{
+            .root = @ptrFromInt(table_frames[0]),
+            .level_one = @ptrFromInt(table_frames[1]),
+            .level_two = @ptrFromInt(table_frames[2]),
+            .level_three = @ptrFromInt(table_frames[3]),
+            .root_physical = table_frames[0],
+        };
+        result.clear();
+        return result;
+    }
+
+    pub fn mapAt(
+        self: *FrameMap,
+        virtual_start: u64,
+        physical_start: u64,
+        size: u64,
+        mapping: Mapping,
+    ) MapError!void {
+        if (size == 0) return error.EmptyRange;
+        if (virtual_start & page_offset_mask != 0 or
+            physical_start & page_offset_mask != 0 or
+            size & page_offset_mask != 0)
+        {
+            return error.UnalignedAddress;
+        }
+        if (virtual_start > std.math.maxInt(u64) - (size - page_size) or
+            physical_start > physical_address_mask - (size - page_size))
+        {
+            return error.AddressOutOfRange;
+        }
+        var offset: u64 = 0;
+        while (offset < size) : (offset += page_size) {
+            try self.mapPage(virtual_start + offset, physical_start + offset, mapping);
+        }
+    }
+
+    pub fn descriptor(self: *const FrameMap, address: u64) ?u64 {
+        if (self.root_entry != tableIndex(address, level_zero_shift) or
+            self.level_one_entry != tableIndex(address, level_one_shift) or
+            self.level_two_entry != tableIndex(address, level_two_shift))
+        {
+            return null;
+        }
+        const value = self.level_three.entries[tableIndex(address, level_three_shift)];
+        return if (value == 0) null else value;
+    }
+
+    pub fn rootAddress(self: *const FrameMap) u64 {
+        return self.root_physical;
+    }
+
+    pub fn clear(self: *FrameMap) void {
+        self.root.entries = @splat(0);
+        self.level_one.entries = @splat(0);
+        self.level_two.entries = @splat(0);
+        self.level_three.entries = @splat(0);
+        self.root_entry = null;
+        self.level_one_entry = null;
+        self.level_two_entry = null;
+    }
+
+    fn mapPage(
+        self: *FrameMap,
+        virtual_address: u64,
+        physical_address: u64,
+        mapping: Mapping,
+    ) MapError!void {
+        const root_index = tableIndex(virtual_address, level_zero_shift);
+        const level_one_index = tableIndex(virtual_address, level_one_shift);
+        const level_two_index = tableIndex(virtual_address, level_two_shift);
+        if (self.root_entry) |existing| {
+            if (existing != root_index or
+                self.level_one_entry.? != level_one_index or
+                self.level_two_entry.? != level_two_index)
+            {
+                return error.TableCapacityExceeded;
+            }
+        } else {
+            self.root.entries[root_index] = try tableDescriptor(@intFromPtr(self.level_one));
+            self.level_one.entries[level_one_index] = try tableDescriptor(@intFromPtr(self.level_two));
+            self.level_two.entries[level_two_index] = try tableDescriptor(@intFromPtr(self.level_three));
+            self.root_entry = root_index;
+            self.level_one_entry = level_one_index;
+            self.level_two_entry = level_two_index;
+        }
+        const entry = &self.level_three.entries[tableIndex(virtual_address, level_three_shift)];
+        const value = try pageDescriptor(physical_address, mapping);
+        if (entry.* != 0 and entry.* != value) return error.ConflictingMapping;
+        entry.* = value;
+    }
+};
+
 pub fn tableDescriptor(next_table_address: u64) DescriptorError!u64 {
     const output_address = if (isHighAddress(next_table_address))
         try physicalAddress(next_table_address)
@@ -554,6 +661,46 @@ test "unmap removes a complete range without disturbing other pages" {
     try std.testing.expectEqual(null, identity.descriptor(0x2000));
     try std.testing.expect(identity.descriptor(0x3000) != null);
     try std.testing.expectError(error.UnmappedAddress, identity.unmap(0x1000, 0x2000));
+}
+
+test "frame map uses owner-provided tables and clears for teardown" {
+    var tables: [4]Table = @splat(.{});
+    const frames = [4]u64{
+        @intFromPtr(&tables[0]),
+        @intFromPtr(&tables[1]),
+        @intFromPtr(&tables[2]),
+        @intFromPtr(&tables[3]),
+    };
+    var map = try FrameMap.init(frames);
+    try map.mapAt(0x0040_0000, 0x1000_0000, page_size, .user_read_execute);
+    try map.mapAt(0x0050_3000, 0x1000_1000, page_size, .user_read_write);
+
+    try std.testing.expectEqual(frames[0], map.rootAddress());
+    try std.testing.expect(map.descriptor(0x0040_0000) != null);
+    try std.testing.expect(map.descriptor(0x0050_3000) != null);
+    try std.testing.expectEqual(
+        try tableDescriptor(frames[1]),
+        tables[0].entries[tableIndex(0x0040_0000, level_zero_shift)],
+    );
+    try std.testing.expectEqual(
+        try tableDescriptor(frames[2]),
+        tables[1].entries[tableIndex(0x0040_0000, level_one_shift)],
+    );
+    try std.testing.expectEqual(
+        try tableDescriptor(frames[3]),
+        tables[2].entries[tableIndex(0x0040_0000, level_two_shift)],
+    );
+    try std.testing.expectError(
+        error.TableCapacityExceeded,
+        map.mapAt(0x0060_0000, 0x1000_1000, page_size, .user_read_only),
+    );
+
+    map.clear();
+    try std.testing.expectEqual(null, map.descriptor(0x0040_0000));
+    try std.testing.expectEqual(null, map.descriptor(0x0050_3000));
+    for (tables) |table| {
+        for (table.entries) |entry| try std.testing.expectEqual(@as(u64, 0), entry);
+    }
 }
 
 test "high-half address conversion preserves the low 48 bits" {

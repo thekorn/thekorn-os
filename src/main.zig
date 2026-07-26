@@ -405,6 +405,8 @@ fn initializeMmu() noreturn {
                 item.address_space.map(region.start, region.end, .device_read_write) catch mmuFailed();
             }
         }
+    } else {
+        verifyV1Lifecycle();
     }
 
     identity_map.map(text_start, text_end, .normal_read_execute) catch mmuFailed();
@@ -426,6 +428,57 @@ fn initializeMmu() noreturn {
     const vector_base = mmu.highAddress(@intFromPtr(&__exception_vectors)) catch mmuFailed();
     const stack_top = mmu.highAddress(@intFromPtr(&__stack_top)) catch mmuFailed();
     mmuEnterHighHalf(continuation, vector_base, stack_top);
+}
+
+fn verifyV1Lifecycle() void {
+    var table: process.ProcessTable = .{};
+    const init_pid = table.spawn(null) catch mmuFailed();
+    const initial_frames = physical_allocator.freeFrameCount();
+    const initial_slots = table.usedSlots();
+    const required_frames = process.requiredFrameCount(&embedded_users.one) catch mmuFailed();
+    for (0..128) |cycle| {
+        const child = table.spawnFromBytes(
+            init_pid,
+            &embedded_users.one,
+            &physical_allocator,
+        ) catch mmuFailed();
+        if (table.entry(child) catch mmuFailed() != process.image_address) mmuFailed();
+        if (table.ownedFrameCount(child) catch mmuFailed() != required_frames or
+            physical_allocator.freeFrameCount() != initial_frames - required_frames or
+            table.rootAddress(child) catch mmuFailed() == 0 or
+            table.descriptor(child, process.image_address) catch mmuFailed() == null or
+            table.descriptor(child, process.data_address) catch mmuFailed() == null or
+            table.descriptor(
+                child,
+                process.stack_address + (process.stack_pages - 1) * mmu.page_size,
+            ) catch mmuFailed() == null)
+        {
+            mmuFailed();
+        }
+        const disposition: process.ExitDisposition = if (cycle % 2 == 0) .exited else .faulted;
+        table.exit(child, .{
+            .disposition = disposition,
+            .code = cycle,
+        }) catch mmuFailed();
+        const waited = table.waitAny(init_pid) catch mmuFailed();
+        if (waited.pid != child or waited.status.disposition != disposition or
+            waited.status.code != cycle)
+        {
+            mmuFailed();
+        }
+        const reaped = table.reap(init_pid, child, &physical_allocator) catch mmuFailed();
+        if (reaped.pid != waited.pid or reaped.status.disposition != waited.status.disposition or
+            reaped.status.code != waited.status.code)
+        {
+            mmuFailed();
+        }
+        if (physical_allocator.freeFrameCount() != initial_frames or
+            table.usedSlots() != initial_slots)
+        {
+            mmuFailed();
+        }
+    }
+    KernelConsole.write("V1:LIFECYCLE_OK\n");
 }
 
 fn loadProcessesFromInitramfs() void {
