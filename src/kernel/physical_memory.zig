@@ -119,6 +119,14 @@ pub const Allocator = struct {
         self.set(index, false);
     }
 
+    pub fn freeFrameCount(self: *const Allocator) usize {
+        var count: usize = 0;
+        for (0..self.frame_count) |index| {
+            if (!self.get(index)) count += 1;
+        }
+        return count;
+    }
+
     fn get(self: *const Allocator, index: usize) bool {
         return self.bitmap[index / 8] & (@as(u8, 1) << @intCast(index % 8)) != 0;
     }
@@ -172,4 +180,16 @@ test "allocator reserves contiguous runs without crossing holes" {
     try std.testing.expectEqual(@as(u64, 0x1000), allocator.allocateContiguous(2).?);
     try std.testing.expectEqual(@as(u64, 0x7000), allocator.allocateContiguous(1).?);
     try std.testing.expectEqual(null, allocator.allocateContiguous(1));
+}
+
+test "allocator reports free frame count across reuse" {
+    var bitmap: [1]u8 = undefined;
+    const ram = [_]fdt.Range{.{ .address = 0x1000, .size = 4 * page_size }};
+    var allocator = try Allocator.init(&bitmap, &ram);
+
+    try std.testing.expectEqual(@as(usize, 4), allocator.freeFrameCount());
+    const frame = allocator.allocate().?;
+    try std.testing.expectEqual(@as(usize, 3), allocator.freeFrameCount());
+    try allocator.free(frame);
+    try std.testing.expectEqual(@as(usize, 4), allocator.freeFrameCount());
 }

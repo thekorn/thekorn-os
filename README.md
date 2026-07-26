@@ -257,6 +257,10 @@ mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
   queues provide IRQ-masked wait/wake/cancel transitions, monotonic deadlines
   use wrap-safe comparisons, and an idle task executes `wfi` when every normal
   task is blocked
+- V1.2: active — a 16-slot process table separates monotonic PIDs from reusable
+  slots, tracks parentage and owned frames, adopts orphans, retains zombie
+  status for wait-one or wait-any, and reclaims frames and slots during reap;
+  host tests prove resource equality over 128 mixed exit and fault cycles
 
 - Phase 0: complete — freestanding build, linker layout, boot assembly, ELF,
   raw image, QEMU run/debug steps

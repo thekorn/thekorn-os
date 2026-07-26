@@ -1,9 +1,12 @@
 const std = @import("std");
 const elf = @import("../formats/elf.zig");
 const mmu = @import("../arch/aarch64/mmu.zig");
+const physical_memory = @import("physical_memory.zig");
 
 pub const count = 2;
 pub const first_task = 1;
+pub const slot_count = 16;
+pub const max_owned_frames = 64;
 pub const image_address: u64 = 0x0040_0000;
 pub const image_pages = 32;
 pub const image_size = image_pages * mmu.page_size;
@@ -160,6 +163,159 @@ pub const Process = struct {
     }
 };
 
+pub const Pid = u64;
+
+pub const ExitDisposition = enum(u8) {
+    exited,
+    faulted,
+    interrupted,
+};
+
+pub const ExitStatus = struct {
+    disposition: ExitDisposition,
+    code: u64,
+};
+
+pub const WaitResult = struct {
+    pid: Pid,
+    status: ExitStatus,
+};
+
+pub const LifecycleError = physical_memory.FreeError || error{
+    ProcessTableFull,
+    PidExhausted,
+    NoSuchProcess,
+    InvalidParent,
+    RootAlreadyExists,
+    InitCannotExit,
+    NotChild,
+    StillRunning,
+    FrameCapacityExceeded,
+    OutOfMemory,
+};
+
+const LifecycleState = enum {
+    free,
+    alive,
+    zombie,
+};
+
+const Record = struct {
+    state: LifecycleState = .free,
+    pid: Pid = 0,
+    parent: ?Pid = null,
+    status: ExitStatus = .{ .disposition = .exited, .code = 0 },
+    frames: [max_owned_frames]u64 = undefined,
+    frame_count: usize = 0,
+};
+
+pub const ProcessTable = struct {
+    records: [slot_count]Record = @splat(.{}),
+    next_pid: Pid = 1,
+    init_pid: ?Pid = null,
+
+    pub fn spawn(self: *ProcessTable, parent: ?Pid) LifecycleError!Pid {
+        if (parent) |parent_pid| {
+            const parent_record = self.find(parent_pid) orelse return error.InvalidParent;
+            if (parent_record.state != .alive) return error.InvalidParent;
+        } else if (self.init_pid != null) return error.RootAlreadyExists;
+        const slot = for (&self.records) |*record| {
+            if (record.state == .free) break record;
+        } else return error.ProcessTableFull;
+        if (self.next_pid == 0 or self.next_pid == std.math.maxInt(Pid)) return error.PidExhausted;
+        const pid = self.next_pid;
+        self.next_pid += 1;
+        slot.* = .{ .state = .alive, .pid = pid, .parent = parent };
+        if (self.init_pid == null and parent == null) self.init_pid = pid;
+        return pid;
+    }
+
+    pub fn allocateOwnedFrame(
+        self: *ProcessTable,
+        pid: Pid,
+        allocator: *physical_memory.Allocator,
+    ) LifecycleError!u64 {
+        const record = self.find(pid) orelse return error.NoSuchProcess;
+        if (record.state != .alive) return error.NoSuchProcess;
+        if (record.frame_count == record.frames.len) return error.FrameCapacityExceeded;
+        const frame = allocator.allocate() orelse return error.OutOfMemory;
+        record.frames[record.frame_count] = frame;
+        record.frame_count += 1;
+        return frame;
+    }
+
+    pub fn exit(self: *ProcessTable, pid: Pid, status: ExitStatus) LifecycleError!void {
+        if (self.init_pid == pid) return error.InitCannotExit;
+        const record = self.find(pid) orelse return error.NoSuchProcess;
+        if (record.state != .alive) return error.NoSuchProcess;
+        record.status = status;
+        record.state = .zombie;
+        const adopter = if (self.init_pid) |init_pid|
+            if (self.alive(init_pid) != null) init_pid else null
+        else
+            null;
+        for (&self.records) |*child| {
+            if (child.state != .free and child.parent == pid) child.parent = adopter;
+        }
+    }
+
+    pub fn waitOne(self: *ProcessTable, parent: Pid, child: Pid) LifecycleError!WaitResult {
+        _ = self.alive(parent) orelse return error.NoSuchProcess;
+        const record = self.find(child) orelse return error.NotChild;
+        if (record.parent != parent) return error.NotChild;
+        if (record.state != .zombie) return error.StillRunning;
+        return .{ .pid = child, .status = record.status };
+    }
+
+    pub fn waitAny(self: *ProcessTable, parent: Pid) LifecycleError!WaitResult {
+        _ = self.alive(parent) orelse return error.NoSuchProcess;
+        var has_child = false;
+        for (&self.records) |*record| {
+            if (record.state == .free or record.parent != parent) continue;
+            has_child = true;
+            if (record.state == .zombie) return .{ .pid = record.pid, .status = record.status };
+        }
+        return if (has_child) error.StillRunning else error.NotChild;
+    }
+
+    pub fn reap(
+        self: *ProcessTable,
+        parent: Pid,
+        child: Pid,
+        allocator: *physical_memory.Allocator,
+    ) LifecycleError!WaitResult {
+        const result = try self.waitOne(parent, child);
+        const record = self.find(child).?;
+        while (record.frame_count != 0) {
+            const index = record.frame_count - 1;
+            try allocator.free(record.frames[index]);
+            record.frame_count = index;
+        }
+        record.* = .{};
+        return result;
+    }
+
+    pub fn usedSlots(self: *const ProcessTable) usize {
+        var count_used: usize = 0;
+        for (&self.records) |*record| {
+            if (record.state != .free) count_used += 1;
+        }
+        return count_used;
+    }
+
+    fn alive(self: *ProcessTable, pid: Pid) ?*Record {
+        const record = self.find(pid) orelse return null;
+        return if (record.state == .alive) record else null;
+    }
+
+    fn find(self: *ProcessTable, pid: Pid) ?*Record {
+        for (&self.records) |*record| {
+            if (record.state != .free and record.pid == pid) return record;
+        }
+        return null;
+    }
+};
+
 test "process memory windows are page aligned and disjoint" {
     var processes: [count]Process = @splat(.{});
     for (&processes) |*item| {
@@ -169,4 +325,87 @@ test "process memory windows are page aligned and disjoint" {
         try std.testing.expectEqual(@as(usize, 0), @intFromPtr(&item.memory.heap) % mmu.page_size);
     }
     try std.testing.expect(@intFromPtr(&processes[0].memory) != @intFromPtr(&processes[1].memory));
+}
+
+test "process lifecycle reclaims frames and slots across 128 cycles" {
+    var bitmap: [32]u8 = undefined;
+    const ram = [_]@import("../formats/fdt.zig").Range{.{
+        .address = 0x1000,
+        .size = 256 * physical_memory.page_size,
+    }};
+    var allocator = try physical_memory.Allocator.init(&bitmap, &ram);
+    var table: ProcessTable = .{};
+    const init_pid = try table.spawn(null);
+    const initial_frames = allocator.freeFrameCount();
+    const initial_slots = table.usedSlots();
+
+    for (0..128) |cycle| {
+        const child = try table.spawn(init_pid);
+        for (0..3) |_| _ = try table.allocateOwnedFrame(child, &allocator);
+        const disposition: ExitDisposition = if (cycle % 2 == 0) .exited else .faulted;
+        try table.exit(child, .{ .disposition = disposition, .code = cycle });
+        const waited = try table.waitAny(init_pid);
+        try std.testing.expectEqual(child, waited.pid);
+        const reaped = try table.reap(init_pid, child, &allocator);
+        try std.testing.expectEqual(@as(u64, cycle), reaped.status.code);
+        try std.testing.expectEqual(initial_frames, allocator.freeFrameCount());
+        try std.testing.expectEqual(initial_slots, table.usedSlots());
+    }
+    try std.testing.expectEqual(@as(Pid, 130), table.next_pid);
+}
+
+test "exiting parents transfer children to init" {
+    var table: ProcessTable = .{};
+    const init_pid = try table.spawn(null);
+    const parent = try table.spawn(init_pid);
+    const child = try table.spawn(parent);
+
+    try table.exit(parent, .{ .disposition = .exited, .code = 0 });
+    try table.exit(child, .{ .disposition = .interrupted, .code = 2 });
+
+    const waited = try table.waitOne(init_pid, child);
+    try std.testing.expectEqual(ExitDisposition.interrupted, waited.status.disposition);
+}
+
+test "process table enforces one immortal init" {
+    var table: ProcessTable = .{};
+    const init_pid = try table.spawn(null);
+
+    try std.testing.expectError(error.RootAlreadyExists, table.spawn(null));
+    try std.testing.expectError(
+        error.InitCannotExit,
+        table.exit(init_pid, .{ .disposition = .exited, .code = 0 }),
+    );
+    try std.testing.expectEqual(@as(usize, 1), table.usedSlots());
+}
+
+test "owned frame acquisition cannot leak on capacity failure" {
+    var bitmap: [16]u8 = undefined;
+    const ram = [_]@import("../formats/fdt.zig").Range{.{
+        .address = 0x1000,
+        .size = 128 * physical_memory.page_size,
+    }};
+    var allocator = try physical_memory.Allocator.init(&bitmap, &ram);
+    var table: ProcessTable = .{};
+    const init_pid = try table.spawn(null);
+    const child = try table.spawn(init_pid);
+
+    for (0..max_owned_frames) |_| _ = try table.allocateOwnedFrame(child, &allocator);
+    const free_before_failure = allocator.freeFrameCount();
+    try std.testing.expectError(
+        error.FrameCapacityExceeded,
+        table.allocateOwnedFrame(child, &allocator),
+    );
+    try std.testing.expectEqual(free_before_failure, allocator.freeFrameCount());
+
+    try table.exit(child, .{ .disposition = .exited, .code = 0 });
+    _ = try table.reap(init_pid, child, &allocator);
+    try std.testing.expectEqual(@as(usize, 128), allocator.freeFrameCount());
+}
+
+test "PID exhaustion leaves slots unchanged" {
+    var table: ProcessTable = .{ .next_pid = std.math.maxInt(Pid) };
+    try std.testing.expectError(error.PidExhausted, table.spawn(null));
+    try std.testing.expectEqual(@as(usize, 0), table.usedSlots());
+    try std.testing.expectEqual(std.math.maxInt(Pid), table.next_pid);
 }
