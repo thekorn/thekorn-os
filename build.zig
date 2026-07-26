@@ -140,6 +140,18 @@ pub fn build(b: *std.Build) void {
         },
     });
     test_step.dependOn(&b.addRunArtifact(rpi_block_tests).step);
+    const virtio_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/platform/qemu_virt/virtio.zig"),
+            .target = b.graph.host,
+            .optimize = if (coverage) .Debug else optimize,
+        }),
+        .test_runner = .{
+            .path = b.path("src/test_runner.zig"),
+            .mode = .simple,
+        },
+    });
+    test_step.dependOn(&b.addRunArtifact(virtio_tests).step);
     if (coverage) {
         const remove_coverage_dirs = b.addSystemCommand(&.{
             "rm",

@@ -236,8 +236,12 @@ The existing headless `run-virt` and `smoke-virt` profiles remain unchanged.
   rectangles, integer lines, and fixed 8 × 8 glyphs; tests cover padded pitch,
   empty and malformed surfaces, edge clipping, channel order, and the complete
   scene's deterministic hash
+- Graphics G2: complete — modern virtio-MMIO discovery, feature negotiation,
+  DMA queue setup, submission, notification, and bounded completion polling are
+  shared by device drivers; synthetic queue tests cover descriptor reuse and
+  the unchanged QEMU storage smoke gate protects the block path
 
-Graphics G2 is the active milestone. The focused
+Graphics G3 is the active milestone. The focused
 [first graphical output plan](docs/graphics-plan.html) tracks the work toward a
 shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
 framebuffer parity while keeping serial diagnostics authoritative. Physical
