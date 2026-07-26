@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Proposed v1 roadmap for turning thekorn-os from a deterministic boot demo into an interactive AArch64 system.">
+  <title>thekorn-os v1 — interactive system plan</title>
+  <script>
+    (() => {
+      const saved = localStorage.getItem("v1-plan-theme");
+      const dark = saved
+        ? saved === "dark"
+        : window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.classList.toggle("dark", dark);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f1e9;
+      --surface: #fffdf8;
+      --surface-raised: #ffffff;
+      --surface-muted: #eae5d8;
+      --text: #18201d;
+      --text-secondary: #46504b;
+      --muted: #737a74;
+      --border: #ccc5b6;
+      --ink: #194f45;
+      --ink-soft: #d9e9e2;
+      --coral: #bc5945;
+      --coral-soft: #f2ddd6;
+      --amber: #8d641e;
+      --amber-soft: #f2e5c7;
+      --blue: #426c87;
+      --blue-soft: #dce8ef;
+      --code-bg: #17201d;
+      --code-text: #e9eee9;
+      --shadow: 0 18px 45px rgb(44 48 41 / 8%);
+      --serif: ui-serif, Georgia, "Times New Roman", serif;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    }
+
+    html.dark {
+      color-scheme: dark;
+      --bg: #121816;
+      --surface: #1a211e;
+      --surface-raised: #202925;
+      --surface-muted: #28312d;
+      --text: #edf2ed;
+      --text-secondary: #cbd4ce;
+      --muted: #9ca8a1;
+      --border: #3f4a45;
+      --ink: #7fc3b2;
+      --ink-soft: #213e37;
+      --coral: #ec967f;
+      --coral-soft: #492d28;
+      --amber: #dfbd79;
+      --amber-soft: #453921;
+      --blue: #8cb9d3;
+      --blue-soft: #263c48;
+      --code-bg: #0d1210;
+      --code-text: #e8eee9;
+      --shadow: 0 18px 45px rgb(0 0 0 / 20%);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      padding: 34px 30px 100px;
+      background:
+        radial-gradient(circle at 88% 2%, var(--ink-soft), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.65 var(--sans);
+    }
+    a { color: var(--coral); text-underline-offset: 3px; }
+    a:hover { text-decoration-thickness: 2px; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
+    code { font-family: var(--mono); }
+    :not(pre) > code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: var(--surface-muted);
+      font-size: .9em;
+    }
+    .page { max-width: 1200px; margin: 0 auto; }
+    .utility {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 38px;
+    }
+    .back-link { color: var(--text-secondary); font-size: 13px; text-decoration: none; }
+    .back-link:hover { color: var(--text); }
+    .theme-toggle {
+      min-width: 44px;
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font: 650 12px var(--sans);
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(270px, .55fr);
+      gap: 36px;
+      align-items: end;
+      padding: 42px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow, .meta, .label, .badge, .phase, th, .toc strong {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+    .eyebrow { margin: 0 0 12px; color: var(--coral); font-weight: 800; }
+    h1, h2 { font-family: var(--serif); font-weight: 500; letter-spacing: -.02em; }
+    h1 { max-width: 760px; margin: 0 0 18px; font-size: clamp(40px, 6.5vw, 68px); line-height: .98; }
+    h2 { margin: 0; font-size: clamp(28px, 4vw, 38px); line-height: 1.1; }
+    h3 { margin: 0 0 8px; font-size: 17px; line-height: 1.35; }
+    p { margin-top: 0; }
+    .lede { max-width: 760px; margin-bottom: 20px; color: var(--text-secondary); font-size: 18px; }
+    .metadata { display: flex; flex-wrap: wrap; gap: 7px 18px; color: var(--muted); }
+    .promise {
+      padding: 24px;
+      border-radius: 14px;
+      background: var(--ink);
+      color: var(--surface-raised);
+    }
+    html.dark .promise { color: #11201b; }
+    .promise .label { display: block; margin-bottom: 12px; opacity: .72; }
+    .promise strong { display: block; font: 500 24px/1.22 var(--serif); }
+    .promise p { margin: 12px 0 0; font-size: 13px; opacity: .82; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 22px 0 48px;
+    }
+    .summary-card {
+      min-height: 122px;
+      padding: 18px;
+      border: 1.5px solid var(--border);
+      border-radius: 13px;
+      background: var(--surface);
+    }
+    .summary-card .label { color: var(--muted); }
+    .summary-card strong { display: block; margin: 7px 0 3px; font: 500 25px/1.15 var(--serif); }
+    .summary-card span:last-child { color: var(--muted); font-size: 13px; }
+    .mobile-nav { display: none; gap: 7px; margin: -22px 0 34px; overflow-x: auto; }
+    .mobile-nav a {
+      flex: 0 0 auto;
+      padding: 6px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text-secondary);
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 54px; align-items: start; }
+    main { min-width: 0; }
+    section { margin-bottom: 72px; scroll-margin-top: 24px; }
+    .section-head { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 13px; align-items: start; }
+    .section-number {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 32px;
+      border-radius: 9px;
+      background: var(--ink-soft);
+      color: var(--ink);
+      font: 700 11px var(--mono);
+    }
+    .section-intro { max-width: 760px; margin: 12px 0 27px 55px; color: var(--muted); }
+    .toc { position: sticky; top: 24px; padding-left: 17px; border-left: 1.5px solid var(--border); }
+    .toc strong { display: block; margin-bottom: 9px; color: var(--muted); }
+    .toc a { display: block; padding: 5px 8px; border-radius: 6px; color: var(--muted); font-size: 13px; text-decoration: none; }
+    .toc a:hover { background: var(--ink-soft); color: var(--text); }
+    .grid-2, .grid-3 { display: grid; gap: 15px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card, .callout, .diagram, .table-wrap, .definition {
+      border: 1.5px solid var(--border);
+      border-radius: 13px;
+      background: var(--surface);
+    }
+    .card { padding: 20px; }
+    .card p, .card li { color: var(--text-secondary); }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .card.must { border-top: 4px solid var(--ink); }
+    .card.should { border-top: 4px solid var(--blue); }
+    .card.defer { border-top: 4px solid var(--coral); }
+    .badge { display: inline-block; margin-bottom: 9px; padding: 3px 7px; border-radius: 6px; }
+    .badge.must { background: var(--ink-soft); color: var(--ink); }
+    .badge.should { background: var(--blue-soft); color: var(--blue); }
+    .badge.defer { background: var(--coral-soft); color: var(--coral); }
+    .badge.risk { background: var(--amber-soft); color: var(--amber); }
+    ul, ol { padding-left: 21px; }
+    li + li { margin-top: 6px; }
+    .callout { padding: 18px 20px; background: var(--surface-muted); }
+    .callout strong { color: var(--coral); }
+    .callout p:last-child { margin-bottom: 0; }
+    .bridge { display: grid; grid-template-columns: 1fr 44px 1fr; gap: 14px; align-items: stretch; }
+    .bridge .arrow { display: grid; place-items: center; color: var(--muted); font-size: 24px; }
+    .bridge-panel { padding: 22px; border: 1.5px solid var(--border); border-radius: 13px; background: var(--surface); }
+    .bridge-panel.v1 { border-color: var(--ink); background: var(--ink-soft); }
+    .bridge-panel p:last-child { margin-bottom: 0; color: var(--text-secondary); }
+    .diagram { padding: 24px; overflow: hidden; }
+    .system-map { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+    .node {
+      position: relative;
+      min-height: 104px;
+      padding: 16px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-raised);
+    }
+    .node.accent { border-color: var(--ink); background: var(--ink-soft); }
+    .node.platform { border-color: var(--blue); background: var(--blue-soft); }
+    .node strong { display: block; margin-bottom: 6px; }
+    .node span { color: var(--muted); font-size: 12.5px; }
+    .node.arrow::after {
+      content: "↓";
+      position: absolute;
+      left: 50%;
+      bottom: -29px;
+      z-index: 2;
+      color: var(--muted);
+      font-size: 20px;
+    }
+    .map-row { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .map-kernel { grid-column: 1 / -1; }
+    .caption { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; min-width: 700px; border-collapse: collapse; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: var(--surface-muted); color: var(--muted); }
+    td { color: var(--text-secondary); font-size: 13.5px; }
+    td:first-child { color: var(--text); font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    .timeline { position: relative; margin-top: 10px; }
+    .timeline::before { content: ""; position: absolute; top: 18px; bottom: 18px; left: 31px; width: 1.5px; background: var(--border); }
+    .milestone { position: relative; display: grid; grid-template-columns: 63px minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+    .phase { padding-top: 20px; color: var(--muted); text-align: center; }
+    .phase::after {
+      content: "";
+      position: absolute;
+      top: 24px;
+      left: 26px;
+      width: 11px;
+      height: 11px;
+      border: 2px solid var(--ink);
+      border-radius: 50%;
+      background: var(--bg);
+    }
+    .milestone-body { padding: 19px 21px; border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface); }
+    .milestone-body p { margin: 6px 0 10px; color: var(--text-secondary); }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tags span { padding: 3px 7px; border-radius: 5px; background: var(--surface-muted); color: var(--muted); font: 10px var(--mono); text-transform: uppercase; }
+    .exit { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--ink-soft); font-size: 13px; }
+    .exit strong { color: var(--ink); }
+    .abi {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 15px;
+      padding: 15px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .abi:last-child { border-bottom: 0; }
+    .abi code { color: var(--ink); font-weight: 700; }
+    .abi p { margin: 0; color: var(--text-secondary); }
+    .command { margin-top: 16px; overflow: hidden; border-radius: 10px; background: var(--code-bg); color: var(--code-text); }
+    .command span { display: block; padding: 8px 13px 0; color: #aab5af; font: 10px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    pre { margin: 0; padding: 10px 13px 14px; overflow-x: auto; font: 12.5px/1.65 var(--mono); }
+    .definition { padding: 23px; }
+    .checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 24px; margin: 0; padding: 0; list-style: none; }
+    .checklist li { position: relative; padding-left: 25px; }
+    .checklist li::before { content: "□"; position: absolute; left: 0; color: var(--ink); font-weight: 900; }
+    footer { margin-top: 28px; padding-top: 20px; border-top: 1.5px solid var(--border); color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { display: none; }
+      .mobile-nav { display: flex; }
+    }
+    @media (max-width: 760px) {
+      body { padding: 22px 16px 70px; }
+      .hero { grid-template-columns: 1fr; padding: 27px 22px; }
+      .summary-grid, .grid-2, .grid-3, .checklist { grid-template-columns: 1fr; }
+      .summary-card { min-height: auto; }
+      .section-intro { margin-left: 0; }
+      .bridge { grid-template-columns: 1fr; }
+      .bridge .arrow { transform: rotate(90deg); }
+      .system-map, .map-row { display: grid; grid-template-columns: 1fr; }
+      .map-kernel { grid-column: 1; }
+      .node.arrow::after { display: none; }
+      .abi { grid-template-columns: 1fr; gap: 5px; }
+    }
+    @media (max-width: 460px) {
+      h1 { font-size: 39px; }
+      .theme-text { display: none; }
+      .section-head { grid-template-columns: 35px minmax(0, 1fr); gap: 9px; }
+      .section-number { width: 34px; height: 29px; }
+      .timeline::before { left: 7px; }
+      .milestone { grid-template-columns: 16px minmax(0, 1fr); gap: 9px; }
+      .phase { writing-mode: vertical-rl; padding: 38px 0 0; font-size: 9px; }
+      .phase::after { left: 2px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      * { transition: none !important; }
+    }
+    @media print {
+      body { padding: 0; background: #fff; color: #111; }
+      .utility, .toc, .mobile-nav { display: none !important; }
+      .layout { display: block; }
+      .hero, .card, .milestone-body, .definition { break-inside: avoid; box-shadow: none; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="utility">
+      <a class="back-link" href="plan.html">← v0 implementation plan</a>
+      <button class="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false"><span aria-hidden="true">◐</span> <span class="theme-text">Theme</span></button>
+    </div>
+
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Proposed release plan · after v0</p>
+        <h1>From boot demo to interactive system</h1>
+        <p class="lede">v0 proves the vertical slice. v1 makes that slice useful repeatedly: type at a serial terminal, launch isolated Zig programs by path, wait for them, inspect files, recover their resources, and do it again without rebooting.</p>
+        <div class="metadata">
+          <span class="meta">Status: design proposal</span>
+          <span class="meta">Updated: 2026-07-26</span>
+          <span class="meta">Baseline: v0 Phase 10 exit</span>
+        </div>
+      </div>
+      <aside class="promise" aria-label="v1 release promise">
+        <span class="label">Release promise</span>
+        <strong>A small, single-user system with a real userspace control loop.</strong>
+        <p>Interactive over PL011 on QEMU <code>virt</code> and Raspberry Pi 4, with the same shell and binaries on both.</p>
+      </aside>
+    </header>
+
+    <div class="summary-grid" aria-label="v1 plan summary">
+      <div class="summary-card"><span class="label">Theme</span><strong>Interactive</strong><span>Input, blocking I/O, shell</span></div>
+      <div class="summary-card"><span class="label">Lifecycle</span><strong>Repeatable</strong><span>Spawn, wait, reap, reclaim</span></div>
+      <div class="summary-card"><span class="label">Storage</span><strong>Read-only</strong><span>VFS over initramfs and FAT</span></div>
+      <div class="summary-card"><span class="label">Execution</span><strong>1 core</strong><span>Keep concurrency inspectable</span></div>
+    </div>
+
+    <nav class="mobile-nav" aria-label="Plan sections">
+      <a href="#thesis">Thesis</a><a href="#bridge">Bridge</a><a href="#architecture">Architecture</a><a href="#features">Features</a><a href="#milestones">Milestones</a><a href="#abi">ABI</a><a href="#verification">Verification</a><a href="#risks">Risks</a><a href="#done">Done</a><a href="#after">After v1</a>
+    </nav>
+
+    <div class="layout">
+      <main>
+        <section id="thesis">
+          <div class="section-head"><span class="section-number">01</span><h2>Make the existing mechanisms composable</h2></div>
+          <p class="section-intro">The next release should turn the v0 demonstrations into services that programs can use over time. It should not restart the project around a larger list of hardware features.</p>
+          <div class="grid-2">
+            <article class="card must">
+              <span class="badge must">v1 must</span>
+              <h3>Complete the control loop</h3>
+              <ul>
+                <li>Receive serial input without polling or losing bytes.</li>
+                <li>Block tasks on input, timers, and child completion.</li>
+                <li>Load, run, exit, wait, and reclaim processes repeatedly.</li>
+                <li>Expose read-only files through descriptors rather than loader-only APIs.</li>
+                <li>Run the shell and commands as ordinary EL0 programs.</li>
+              </ul>
+            </article>
+            <article class="card defer">
+              <span class="badge defer">Not in v1</span>
+              <h3>Do not multiply state spaces yet</h3>
+              <ul>
+                <li>No SMP, kernel preemption, or general spinlock layer.</li>
+                <li>No writable filesystem, page cache, or crash recovery.</li>
+                <li>No fork, copy-on-write, general signals, pipes, or background jobs.</li>
+                <li>No networking, USB, graphics, dynamic linking, or Linux ABI.</li>
+                <li>No FP/SIMD context switching; keep the v0 trap policy.</li>
+              </ul>
+            </article>
+          </div>
+          <p class="callout" style="margin-top:15px"><strong>Why SMP waits:</strong> blocking, process teardown, descriptors, and the VFS establish the ownership and synchronization boundaries that SMP would need. Adding cores first would force locking decisions into demo-shaped structures and make lifecycle bugs much harder to isolate.</p>
+        </section>
+
+        <section id="bridge">
+          <div class="section-head"><span class="section-number">02</span><h2>Close v0 before widening the contract</h2></div>
+          <p class="section-intro">v1 begins from a released, reproducible baseline—not from the current QEMU-only midpoint. Preserve v0 as a regression profile while the normal boot path becomes interactive.</p>
+          <div class="bridge">
+            <article class="bridge-panel">
+              <span class="badge should">v0 exit</span>
+              <h3>Deterministic vertical slice</h3>
+              <p>Two isolated static Zig programs load from read-only FAT, run under timer preemption, and pass the same automated demo on QEMU and a physical Pi 4.</p>
+            </article>
+            <div class="arrow" aria-hidden="true">→</div>
+            <article class="bridge-panel v1">
+              <span class="badge must">v1 entry</span>
+              <h3>Frozen regression baseline</h3>
+              <p>Tag the v0 release, retain its serial transcript as <code>smoke-v0</code>, document frame counts and fixed limits, then add a separate interactive boot profile.</p>
+            </article>
+          </div>
+          <div class="grid-3" style="margin-top:15px">
+            <article class="card"><h3>Measure first</h3><p>Record free frames, page-table use, boot time, and task slots before and after the v0 demo. These become leak and regression oracles.</p></article>
+            <article class="card"><h3>Separate tests from policy</h3><p>Keep deliberate faults and progress counters in the v0 smoke profile. The production profile should boot <code>init</code>, not run kernel self-tests forever.</p></article>
+            <article class="card"><h3>Keep hardware honest</h3><p>Do not start v1 board features until the complete v0 storage and two-process gates pass on the physical Pi.</p></article>
+          </div>
+          <p class="callout" style="margin-top:15px"><strong>Planning assumption:</strong> v0 Phase 9 storage now passes on QEMU, but its polling virtio path and load-by-slice interfaces remain demo contracts. Phase 10 Pi SD parity and physical timing behavior do not exist yet. Revisit V1.0, V1.3, and V1.4 estimates after the v0 hardware gate rather than treating the QEMU interfaces as final.</p>
+        </section>
+
+        <section id="architecture">
+          <div class="section-head"><span class="section-number">03</span><h2>Put policy in userspace and waiting in the kernel</h2></div>
+          <p class="section-intro">The shell parses commands; the kernel owns resources and blocks work. A tiny PID 1 is the recovery anchor. Static mounts and bounded tables keep the first interactive release auditable.</p>
+          <div class="diagram">
+            <div class="system-map" role="img" aria-label="v1 architecture: init supervises a shell and commands, which use the ABI over process, VFS, terminal, scheduler, and platform services">
+              <div class="map-row">
+                <div class="node accent arrow"><strong>PID 1 · init</strong><span>Starts the shell, adopts orphans, reaps any child, and starts a new shell after a fault.</span></div>
+                <div class="node accent arrow"><strong>Serial shell</strong><span>Line editing, path resolution, built-ins, foreground spawn, Ctrl-C break, and wait.</span></div>
+                <div class="node accent arrow"><strong>Zig commands</strong><span>Static EL0 executables with argc/argv and inherited descriptors 0, 1, and 2.</span></div>
+              </div>
+              <div class="node map-kernel arrow"><strong>Versioned userspace ABI</strong><span>Checked pointers · file descriptors · process handles · stable errors · no Linux compatibility claim</span></div>
+              <div class="map-row">
+                <div class="node platform"><strong>Process + scheduler</strong><span>Reusable slots, parent/child state, cancellation-safe waits, deadlines, idle task, frame ownership.</span></div>
+                <div class="node platform"><strong>Read-only VFS</strong><span><code>/rom</code> initramfs · <code>/disk</code> FAT · open/read/close/stat/readdir · internal read-at.</span></div>
+                <div class="node platform"><strong>Terminal</strong><span>PL011 RX interrupt, bounded ring, blocking reads, foreground break, polled panic output.</span></div>
+              </div>
+            </div>
+            <p class="caption">The mount table is fixed at boot. There is no mount syscall, global current directory, terminal escape parser, or kernel command interpreter in v1.</p>
+          </div>
+          <div class="grid-2" style="margin-top:15px">
+            <article class="card">
+              <h3>Bounded by design</h3>
+              <p>Start with explicit compile-time capacities: 16 process slots, 16 descriptors per process, 16 arguments, 256-byte paths and shell lines, and a 512-byte UART RX ring. Exhaustion returns a stable error; it never silently corrupts state.</p>
+            </article>
+            <article class="card">
+              <h3>No general kernel heap yet</h3>
+              <p>Allocate user pages and translation tables from the frame allocator, but use reusable fixed pools for tasks, process records, file descriptions, and waiters. Add a kernel heap only when measured fragmentation or object diversity justifies it.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="features">
+          <div class="section-head"><span class="section-number">04</span><h2>Define one coherent feature set</h2></div>
+          <p class="section-intro">Everything marked “must” contributes directly to the release promise. “Should” work may enter only after all must-have gates are green on both targets.</p>
+          <div class="grid-3">
+            <article class="card must"><span class="badge must">Must</span><h3>Blocking scheduler</h3><p>Runnable, blocked, sleeping, zombie, and free states; cancellation-safe wait queues for RX, timers, and child exits; an idle task using <code>wfi</code>.</p></article>
+            <article class="card must"><span class="badge must">Must</span><h3>Process lifecycle</h3><p>Monotonic PIDs, parentage, spawn, exit, wait for one or any child, orphan adoption, fault termination, and complete frame, mapping, stack, slot, and descriptor reclamation.</p></article>
+            <article class="card must"><span class="badge must">Must</span><h3>Interactive terminal</h3><p>Interrupt-driven PL011 receive, overflow accounting, CR/LF normalization, blocking byte reads, shell-owned editing, and Ctrl-C termination of only the foreground child.</p></article>
+            <article class="card must"><span class="badge must">Must</span><h3>Files and descriptors</h3><p>A read-only VFS over initramfs and FAT, per-process descriptor tables, reference-counted inherited file descriptions, directories, and checked user buffers.</p></article>
+            <article class="card must"><span class="badge must">Must</span><h3>PID 1 and shell</h3><p>A rescue-capable initramfs shell with <code>help</code>, <code>echo</code>, <code>pwd</code>, <code>cd</code>, <code>ls</code>, <code>cat</code>, <code>run</code>, <code>uptime</code>, and <code>reboot</code>.</p></article>
+            <article class="card must"><span class="badge must">Must</span><h3>Program contract</h3><p>Initial user stack with <code>argc</code>/<code>argv</code>, inherited stdin/stdout/stderr, documented limits, stable errors, and an ABI epoch frozen for the v1 release.</p></article>
+            <article class="card should"><span class="badge should">Should</span><h3>Small diagnostics</h3><p><code>ps</code> and <code>mem</code> backed by one versioned, read-only system snapshot API; include only if it does not expose internal pointers or unstable layouts.</p></article>
+            <article class="card should"><span class="badge should">Should</span><h3>Usability polish</h3><p>Command history, tab completion from one directory, and ANSI color detection are optional and may not complicate the terminal or VFS contracts.</p></article>
+            <article class="card defer"><span class="badge defer">Deferred</span><h3>Persistence and parallelism</h3><p>Filesystem writes, pipes, jobs, SMP, FP/SIMD, sockets, and dynamic executables each require a separate design and release gate.</p></article>
+          </div>
+        </section>
+
+        <section id="milestones">
+          <div class="section-head"><span class="section-number">05</span><h2>Build from ownership to interaction</h2></div>
+          <p class="section-intro">Each phase has an observable gate and leaves the kernel in a valid state. The order prevents UART, filesystem, and process-lifecycle bugs from arriving together.</p>
+          <div class="timeline">
+            <article class="milestone">
+              <div class="phase">V1.0</div>
+              <div class="milestone-body"><span class="badge should">Baseline</span><h3>Freeze v0 and split boot profiles</h3><p>Complete every v0 exit criterion, capture QEMU and Pi transcripts, and preserve the exact self-test sequence behind a build option. Make the normal boot path enter a placeholder init task.</p><div class="tags"><span>v0 tag</span><span>smoke-v0</span><span>boot profile</span><span>metrics</span></div><div class="exit"><strong>Exit:</strong> the QEMU v0 transcript is byte-for-byte stable, the Pi transcript preserves the required marker sequence, and the normal profile reaches <code>V1:INIT</code> on both.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase">V1.1</div>
+              <div class="milestone-body"><span class="badge must">Foundation</span><h3>Task states, wait queues, and monotonic deadlines</h3><p>Replace the runnable bitmap with explicit states. Add IRQ-safe wait, wake, and cancellation operations for a single core, timer deadlines, and a permanent idle task. A blocked task must be removable during fault or process teardown. Keep scheduler policy round-robin.</p><div class="tags"><span>blocked</span><span>sleeping</span><span>wait queue</span><span>cancel</span><span>wfi</span></div><div class="exit"><strong>Exit:</strong> host tests cover lost-wakeup and blocked-task cancellation boundaries; QEMU proves sleepers wake in order and an all-blocked system idles without a busy loop.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase">V1.2</div>
+              <div class="milestone-body"><span class="badge must">Ownership</span><h3>Reusable processes and frame-backed address spaces</h3><p>Separate PID from table slot. Replace embedded process memory and inline translation-table pools with allocator-owned frames, add table teardown, and implement spawn-from-bytes, exit, wait-one, wait-any, reap, and orphan adoption. Keep fixed object pools and make every partial-load error unwind.</p><div class="tags"><span>pid</span><span>spawn</span><span>wait</span><span>reap</span><span>unmap</span></div><div class="exit"><strong>Exit:</strong> one kernel harness performs 128 spawn/fault/exit/wait cycles and ends with exactly the initial free-frame, task-slot, and process-slot counts.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase">V1.3</div>
+              <div class="milestone-body"><span class="badge must">Input</span><h3>Interrupt-driven serial receive</h3><p>Add PL011 RX interrupt support to both BSPs, a 512-byte single-producer/single-consumer ring, overflow counters, blocking terminal reads, and a single foreground PID. Ctrl-C terminates that child with an interrupted status; it does not introduce user signal handlers. Preserve the allocation-free polled path for panic output.</p><div class="tags"><span>pl011 rx</span><span>gic</span><span>ring buffer</span><span>blocking read</span><span>break</span></div><div class="exit"><strong>Exit:</strong> a scripted 4 KiB burst has no reordering or silent loss; blocked readers wake once; QEMU reports the exact injected overflow count, while Pi detects, counts, and exposes overflow without requiring timing-dependent equality.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase">V1.4</div>
+              <div class="milestone-body"><span class="badge must">Files</span><h3>Read-only VFS and descriptor tables</h3><p>Adapt the v0 initramfs and FAT readers behind a path-based VFS with fixed mounts at <code>/rom</code> and <code>/disk</code>. Add reference-counted open file descriptions, per-process descriptors, internal positional reads, stat and directory iteration, and cleanup on close or exit. The ELF loader reads fixed-size headers, then streams segments directly into allocated frames; it never needs a whole-file kernel buffer.</p><div class="tags"><span>vfs</span><span>fd</span><span>read at</span><span>initramfs</span><span>fat</span><span>readdir</span></div><div class="exit"><strong>Exit:</strong> host tests reject malformed and escaping paths; two processes read the same file independently; inherited descriptors remain valid after parent close; descriptor and block-read failures leak no slots or frames.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase">V1.5</div>
+              <div class="milestone-body"><span class="badge must">Userspace</span><h3>Define provisional ABI epoch 2, then boot init and the shell</h3><p>Move from the v0 console-shaped ABI to descriptor I/O, child lifecycle, time, and path operations. Build the initial argc/argv stack, launch PID 1 and the shell from initramfs, and run external commands from <code>/disk/bin</code>. Foreground spawn registers one terminal-owned child so Ctrl-C can end a runaway command without a general signal system.</p><div class="tags"><span>abi 2</span><span>argc/argv</span><span>pid 1</span><span>shell</span><span>commands</span></div><div class="exit"><strong>Exit:</strong> an automated serial session lists FAT files, cats a multi-block file, runs a command with arguments, observes its exit status, interrupts a runaway command, and returns to the prompt.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase">V1.6</div>
+              <div class="milestone-body"><span class="badge risk">Hardening</span><h3>Fault containment and resource pressure</h3><p>Make bad pointers, unknown syscalls, malformed ELF files, descriptor exhaustion, out-of-frame conditions, and user faults terminate or fail only the responsible operation. Add task/PID/ESR context to unexpected kernel exceptions.</p><div class="tags"><span>fault isolation</span><span>oom</span><span>bad elf</span><span>leak checks</span></div><div class="exit"><strong>Exit:</strong> the shell survives every negative fixture and completes 128 mixed command launches with unchanged resource counters and no stale TLB access.</div></div>
+            </article>
+            <article class="milestone">
+              <div class="phase">V1.7</div>
+              <div class="milestone-body"><span class="badge must">Release</span><h3>Freeze ABI epoch 2, prove Raspberry Pi parity, and cut v1</h3><p>After the shell and hardening fixtures settle status records and errors, freeze epoch 2. Run the identical filesystem image, userspace binaries, ABI tests, shell transcript, and lifecycle stress on QEMU <code>virt</code> and physical Pi 4. Document serial setup, limits, recovery, and known omissions.</p><div class="tags"><span>abi freeze</span><span>qemu</span><span>pi 4</span><span>same binaries</span><span>release</span></div><div class="exit"><strong>Exit:</strong> both targets emit <code>V1:INTERACTIVE_OK</code> after the scripted session; a human can then continue using the prompt without rebooting.</div></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="abi">
+          <div class="section-head"><span class="section-number">06</span><h2>Freeze a small ABI around resources</h2></div>
+          <p class="section-intro">The current ABI is explicitly experimental and console-shaped. Define epoch 2 provisionally for the first shell, freeze it only at the v1 release candidate after hardening, retain epoch 1 only in the v0 smoke profile, and avoid promising POSIX behavior.</p>
+          <div class="card">
+            <div class="abi"><code>read / write</code><p>Operate on descriptors with checked user slices. Descriptors 0, 1, and 2 are inherited terminal streams. Short reads and writes are valid.</p></div>
+            <div class="abi"><code>open / close</code><p>Read-only open flags in v1. Paths are copied, length-bounded, normalized in the VFS, and never retained as user pointers.</p></div>
+            <div class="abi"><code>stat / readdir</code><p>Use fixed-width, versioned records. Directory iteration has an explicit cursor; it does not expose FAT offsets or kernel object layouts.</p></div>
+            <div class="abi"><code>spawn / wait / exit</code><p>Spawn a static AArch64 ELF by path with bounded arguments and inherited standard descriptors. A foreground flag binds one child to terminal Ctrl-C. Wait accepts a specific child PID or “any child,” returns the reaped PID, and copies a fixed-width exited, faulted, or interrupted status to a checked user pointer.</p></div>
+            <div class="abi"><code>clock / sleep</code><p>Expose monotonic time in nanoseconds and sleep to an absolute deadline so user code never depends on the hardware timer frequency.</p></div>
+            <div class="abi"><code>grow / yield</code><p>Keep bounded heap growth with documented page alignment. Retain yield for tests and cooperative programs, but normal waiting uses blocking calls.</p></div>
+            <div class="abi"><code>reboot</code><p>Permit PID 1 or the foreground shell to request a documented platform reset. If a target cannot reset reliably, halt with a machine-readable marker.</p></div>
+          </div>
+          <div class="grid-2" style="margin-top:15px">
+            <article class="card"><h3>Error model</h3><p>Keep negative integer errors, add explicit values for bad descriptor, not found, not a directory, table full, not a child, interrupted/faulted child, and read-only operation. Unknown epochs remain rejected.</p></article>
+            <article class="card"><h3>Initial stack contract</h3><p>Enter at the ELF entry with a 16-byte-aligned stack containing copied UTF-8 argument strings and an argc/argv vector. No environment, auxiliary vector, dynamic loader, or libc contract in v1.</p></article>
+          </div>
+        </section>
+
+        <section id="verification">
+          <div class="section-head"><span class="section-number">07</span><h2>Test long-lived behavior, not only boot</h2></div>
+          <p class="section-intro">The important v1 failures happen on the second or hundredth operation: a stale mapping, lost wakeup, child that was not reaped, leaked descriptor, or full ring. Resource counters become part of the test contract.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Layer</th><th>Required coverage</th><th>Gate</th></tr></thead>
+              <tbody>
+                <tr><td>Compile-time</td><td>User record layouts, syscall numbers, frame offsets, pool capacities, and architecture/BSP contracts agree.</td><td>Every build</td></tr>
+                <tr><td>Native Zig</td><td>Wait/wake/cancel queues, PID/slot reuse, wait-any ordering, partial-load cleanup, descriptor reference counts, path normalization, VFS positional reads, argv layout, UART ring wrap and overflow.</td><td>Every change</td></tr>
+                <tr><td>v0 regression</td><td>The frozen boot-to-two-process demonstration and all existing MMU, exception, timer, and isolation probes remain intact.</td><td>Every milestone</td></tr>
+                <tr><td>QEMU interactive</td><td>Inject serial commands and assert prompt, output, status, ordering, blocking, fault recovery, resource equality, and final marker.</td><td>Every milestone from V1.3</td></tr>
+                <tr><td>QEMU stress</td><td>At least 128 mixed clean exits, faults, invalid ELF loads, file reads, and allocation failures without leaks or hangs.</td><td>V1.2, V1.6, release</td></tr>
+                <tr><td>Physical Pi 4</td><td>PL011 RX/GIC behavior, idle wake events, SD reads, cache coherency, teardown/TLB behavior, and the same scripted shell transcript.</td><td>Every BSP change and release</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="command">
+            <span>Target build interface — exact names added with their milestone</span>
+            <pre><code>nix develop --command zig build test
+nix develop --command zig build smoke-v0
+nix develop --command zig build smoke-v1
+nix develop --command zig build stress-v1</code></pre>
+          </div>
+          <p class="caption">Keep serial markers sparse and state-based: <code>V1:INIT</code>, <code>V1:SHELL_READY</code>, <code>V1:STRESS_OK</code>, and <code>V1:INTERACTIVE_OK</code>. Command output itself remains human-readable.</p>
+        </section>
+
+        <section id="risks">
+          <div class="section-head"><span class="section-number">08</span><h2>Protect ownership and wakeup invariants</h2></div>
+          <p class="section-intro">v1 adds fewer hardware mechanisms than v0, but it introduces long-lived mutable state. Make invariants explicit before optimizing.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Risk</th><th>Severity</th><th>Required mitigation</th></tr></thead>
+              <tbody>
+                <tr><td>Lost wakeup</td><td><span class="badge risk">High</span></td><td>Check condition and enqueue with local IRQs masked; wake after publishing data/state; test both sides of the interrupt-versus-block boundary.</td></tr>
+                <tr><td>Use-after-reap</td><td><span class="badge risk">High</span></td><td>Separate monotonic PID from reusable slot, define zombie ownership, and invalidate task/process links before frames return to the allocator.</td></tr>
+                <tr><td>Stale translation</td><td><span class="badge risk">High</span></td><td>Unmap before freeing frames, perform the architecturally required TLB invalidation and barriers, and stress immediate slot/address reuse.</td></tr>
+                <tr><td>Partial spawn leak</td><td><span class="badge risk">High</span></td><td>Give creation one unwind path with an ownership ledger for ELF pages, tables, stack, arguments, descriptors, process slot, and task slot.</td></tr>
+                <tr><td>UART overrun</td><td><span class="badge should">Medium</span></td><td>Drain hardware FIFO in the IRQ, use a bounded ring, count drops, wake readers after publishing, and make overflow visible.</td></tr>
+                <tr><td>Filesystem policy leak</td><td><span class="badge should">Medium</span></td><td>Keep FAT details behind a read-only backend; normalize paths once; do not expose sectors, clusters, or host structure packing in the ABI.</td></tr>
+                <tr><td>Shell in kernel</td><td><span class="badge should">Medium</span></td><td>Only the early rescue marker and panic path stay privileged. Parsing, editing, built-ins, and command dispatch all run at EL0.</td></tr>
+                <tr><td>Scope creep</td><td><span class="badge should">Medium</span></td><td>Foreground jobs, fixed mounts, static ELF, read-only storage, one core, integer state, and explicit limits are release constraints.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="done">
+          <div class="section-head"><span class="section-number">09</span><h2>v1 is done when the prompt remains trustworthy</h2></div>
+          <p class="section-intro">A prompt appearing once is not the gate. The system must survive useful work, failures, and resource reuse on both supported machines.</p>
+          <div class="definition">
+            <ul class="checklist">
+              <li>Every v0 definition-of-done item still passes.</li>
+              <li>Normal boot starts PID 1 and an EL0 serial shell.</li>
+              <li>QEMU and Pi use the same ABI and user ELF files.</li>
+              <li>Terminal input blocks and wakes without busy polling.</li>
+              <li>Shell can navigate and read initramfs and FAT files.</li>
+              <li>External commands receive bounded argc/argv.</li>
+              <li>stdin, stdout, and stderr are inherited descriptors.</li>
+              <li>Spawn, exit, wait, fault, and reap are observable.</li>
+              <li>PID 1 adopts orphans and recovers a failed shell.</li>
+              <li>Ctrl-C ends a runaway foreground child and restores the prompt.</li>
+              <li>128 mixed launches leave all resource counts unchanged.</li>
+              <li>Bad pointers and malformed ELF never panic the kernel.</li>
+              <li>Full tables and out-of-memory return stable errors.</li>
+              <li>Unexpected kernel faults report task, PID, ESR, ELR, and FAR.</li>
+              <li>The v1 scripted serial transcript passes on physical Pi 4.</li>
+              <li>README documents commands, limits, ABI, and recovery.</li>
+              <li>No writable storage or secondary core is enabled.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="after">
+          <div class="section-head"><span class="section-number">10</span><h2>Use v1 as the dependency base for later releases</h2></div>
+          <p class="section-intro">These are next candidates, not hidden v1 stretch goals. Choose one release theme after usage shows where the system is most constrained.</p>
+          <div class="grid-2">
+            <article class="card"><span class="badge should">Concurrency track</span><h3>SMP and synchronization</h3><p>Start secondary cores, add per-CPU state, replace local IRQ critical sections with explicit locks where ownership crosses cores, use targeted TLB shootdowns, and test scheduler fairness. v1’s wait and ownership boundaries are the prerequisite.</p></article>
+            <article class="card"><span class="badge should">Persistence track</span><h3>Writable data filesystem</h3><p>Add a cache and ordered write contract on a dedicated data partition—not the firmware boot FAT by default. Define power-loss expectations before exposing create, truncate, or rename.</p></article>
+            <article class="card"><span class="badge should">Compute track</span><h3>FP/SIMD userspace</h3><p>Save and restore architectural vector state, define lazy or eager ownership, update exception handling, and enable Zig code generation only after cross-task leakage tests pass.</p></article>
+            <article class="card"><span class="badge should">Connectivity track</span><h3>Networking and pipes</h3><p>Build stream and readiness semantics on v1 descriptors, blocking, timers, and bounded buffers. Start with virtio-net in QEMU before selecting a Pi Ethernet/USB path.</p></article>
+          </div>
+          <p class="callout" style="margin-top:15px"><strong>Recommended next release after v1:</strong> choose SMP if the goal remains kernel-mechanism learning; choose writable data storage if the goal shifts toward practical standalone use. Do not combine both in one milestone.</p>
+        </section>
+      </main>
+
+      <aside class="toc" aria-label="Table of contents">
+        <strong>On this page</strong>
+        <a href="#thesis">01 · Release thesis</a>
+        <a href="#bridge">02 · v0 bridge</a>
+        <a href="#architecture">03 · Architecture</a>
+        <a href="#features">04 · Feature set</a>
+        <a href="#milestones">05 · Milestones</a>
+        <a href="#abi">06 · ABI contract</a>
+        <a href="#verification">07 · Verification</a>
+        <a href="#risks">08 · Risks</a>
+        <a href="#done">09 · Definition of done</a>
+        <a href="#after">10 · After v1</a>
+      </aside>
+    </div>
+
+    <footer>thekorn-os v1 proposal · assumes completion of the <a href="plan.html">v0 implementation plan</a> · self-contained HTML with no external assets</footer>
+  </div>
+
+  <script>
+    (() => {
+      const button = document.querySelector(".theme-toggle");
+      const label = button.querySelector(".theme-text");
+
+      function updateButton() {
+        const dark = document.documentElement.classList.contains("dark");
+        button.setAttribute("aria-pressed", String(dark));
+        button.setAttribute("aria-label", `Switch to ${dark ? "light" : "dark"} theme`);
+        label.textContent = dark ? "Light" : "Dark";
+      }
+
+      button.addEventListener("click", () => {
+        const dark = document.documentElement.classList.toggle("dark");
+        localStorage.setItem("v1-plan-theme", dark ? "dark" : "light");
+        updateButton();
+      });
+
+      updateButton();
+    })();
+  </script>
+</body>
+</html>
