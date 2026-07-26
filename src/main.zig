@@ -73,6 +73,11 @@ var kernel_scheduler: scheduler.Scheduler = .{};
 var scheduling_enabled = false;
 var scheduling_phase: u8 = cooperative_phase;
 var v1_wake_count: usize = 0;
+var kernel_terminal: terminal.Terminal = .{};
+var terminal_wait_queue: scheduler.WaitQueue = .{};
+var terminal_phase: u8 = 0;
+var terminal_irq_bytes: usize = 0;
+var terminal_hardware_errors: usize = 0;
 var cooperative_progress: [scheduler.task_count]usize = @splat(0);
 var preemptive_progress: [scheduler.task_count]usize = @splat(0);
 var processes: [process.count]process.Process align(mmu.page_size) linksection(if (builtin.target.ofmt == .macho) "__DATA,__process_bss" else ".process.bss") = @splat(.{});
@@ -222,9 +227,41 @@ fn v1SchedulerTask(task_id: usize) callconv(.c) noreturn {
         disableInterrupts();
         if (timer.ticks() < 3) schedulerFailed();
         KernelConsole.write("V1:SCHEDULER_OK\n");
-        KernelConsole.write("V1:INIT\n");
-        halt();
+        runV1Terminal();
     }
+    schedulerBlock();
+}
+
+fn runV1Terminal() noreturn {
+    kernel_terminal = .{};
+    terminal_wait_queue = .{};
+    @atomicStore(u8, &terminal_phase, 1, .release);
+    @atomicStore(usize, &terminal_irq_bytes, 0, .release);
+    @atomicStore(usize, &terminal_hardware_errors, 0, .release);
+    uart.enableRxInterrupt();
+    KernelConsole.write("V1:RX_READY\n");
+    enableInterrupts();
+
+    var received: usize = 0;
+    while (received < 4096) {
+        if (kernel_terminal.read()) |byte| {
+            if (byte != @as(u8, @truncate(received))) schedulerFailed();
+            received += 1;
+        } else {
+            schedulerWaitForTerminal();
+        }
+    }
+    disableInterrupts();
+    if (kernel_terminal.overflows() != 0 or
+        @atomicLoad(usize, &terminal_hardware_errors, .acquire) != 0)
+    {
+        schedulerFailed();
+    }
+    @atomicStore(usize, &terminal_irq_bytes, 0, .release);
+    @atomicStore(u8, &terminal_phase, 2, .release);
+    KernelConsole.write("V1:RX_BURST_OK\n");
+    KernelConsole.write("V1:OVERFLOW_READY\n");
+    enableInterrupts();
     schedulerBlock();
 }
 
@@ -238,6 +275,10 @@ fn schedulerSleep(deadline: usize) void {
 fn schedulerBlock() noreturn {
     asm volatile ("svc #3" ::: .{ .memory = true });
     schedulerFailed();
+}
+
+fn schedulerWaitForTerminal() void {
+    asm volatile ("svc #4" ::: .{ .memory = true });
 }
 
 fn schedulerYield() void {
@@ -779,6 +820,20 @@ fn handleKernelSupervisorCall(frame: *exceptions.Frame) *exceptions.Frame {
             return next;
         }
         if (immediate == 3) return blockCurrentTask(frame);
+        if (immediate == 4) {
+            if (@atomicLoad(usize, &kernel_terminal.tail, .monotonic) !=
+                @atomicLoad(usize, &kernel_terminal.head, .acquire))
+            {
+                return frame;
+            }
+            saveCurrentUserStack();
+            const next = kernel_scheduler.blockCurrentOn(
+                &terminal_wait_queue,
+                frame,
+            ) catch schedulerFailed();
+            switchToCurrentTask();
+            return next;
+        }
         schedulerFailed();
     }
     const item = currentProcess() orelse schedulerFailed();
@@ -1016,6 +1071,38 @@ fn handleIrq(vector: usize, frame: *exceptions.Frame) *exceptions.Frame {
         if (scheduling_enabled) {
             return dispatchTask(frame, .preemptive);
         }
+    } else if (interrupt_id == uart.interrupt_id) {
+        var published = false;
+        var overflow_complete = false;
+        while (uart.readByte()) |received| {
+            if (received.errors != 0) {
+                _ = @atomicRmw(usize, &terminal_hardware_errors, .Add, 1, .monotonic);
+            }
+            const previous_head = @atomicLoad(usize, &kernel_terminal.head, .monotonic);
+            _ = kernel_terminal.receive(received.byte);
+            published = published or
+                previous_head != @atomicLoad(usize, &kernel_terminal.head, .acquire);
+            const count = @atomicRmw(usize, &terminal_irq_bytes, .Add, 1, .acq_rel) + 1;
+            overflow_complete = overflow_complete or
+                (@atomicLoad(u8, &terminal_phase, .acquire) == 2 and
+                    count >= terminal.capacity + 64);
+        }
+        uart.gic.end(acknowledgement);
+        if (published and @atomicLoad(u8, &terminal_phase, .acquire) == 1) {
+            kernel_scheduler.wakeOne(&terminal_wait_queue);
+        }
+        if (overflow_complete) {
+            if (@atomicLoad(usize, &terminal_irq_bytes, .acquire) != terminal.capacity + 64 or
+                kernel_terminal.overflows() != 64 or
+                @atomicLoad(usize, &terminal_hardware_errors, .acquire) != 0)
+            {
+                schedulerFailed();
+            }
+            KernelConsole.write("V1:TERMINAL_OK\n");
+            KernelConsole.write("V1:INIT\n");
+            halt();
+        }
+        if (scheduling_enabled) return dispatchTask(frame, .preemptive);
     } else if (interrupt_id < uart.gic.first_special_interrupt) {
         _ = @atomicRmw(usize, &unexpected_interrupts, .Add, 1, .monotonic);
         uart.gic.end(acknowledgement);
@@ -1025,6 +1112,10 @@ fn handleIrq(vector: usize, frame: *exceptions.Frame) *exceptions.Frame {
 
 fn disableInterrupts() void {
     asm volatile ("msr DAIFSet, #2" ::: .{ .memory = true });
+}
+
+fn enableInterrupts() void {
+    asm volatile ("msr DAIFClr, #2" ::: .{ .memory = true });
 }
 
 pub fn panic(message: []const u8, _: ?*std.lang.StackTrace, return_address: ?usize) noreturn {

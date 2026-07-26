@@ -188,6 +188,8 @@ words = [
     "scriptable",
     "scanout",
     "semihost",
+    "sendall",
+    "settimeout",
     "shootdowns",
     "stdenv",
     "stp",

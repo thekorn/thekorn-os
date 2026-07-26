@@ -115,8 +115,9 @@ nix develop --command zig build run-virt
 ```
 
 The normal build now selects the v1 boot profile. It shares platform, memory,
-and MMU initialization with v0, emits `V1:INIT`, and idles while the init path
-is developed. The frozen v0 self-test remains available as a regression gate:
+and MMU initialization with v0, exercises reusable process and scheduler
+life cycles, and validates interrupt-driven terminal input before emitting
+`V1:INIT`. The frozen v0 self-test remains available as a regression gate:
 
 ```sh
 nix develop --command zig build smoke-v0
@@ -249,7 +250,7 @@ mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
 
 ## Project status
 
-- V1.0: active — the frozen v0 self-test and the normal v1 init profile share
+- V1.0: complete — the frozen v0 self-test and the normal v1 init profile share
   platform, physical-memory, and high-half MMU initialization; `smoke-v0`
   preserves the complete baseline marker contract and `smoke-v1` requires the
   placeholder `V1:INIT` path
@@ -264,6 +265,11 @@ mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
   loads allocator-backed ELF and translation-table pages for 128 mixed normal
   and fault-status cycles, then proves exact frame, task-slot, and process-slot
   equality
+- V1.3: complete — both BSPs route PL011 receive interrupts into a bounded
+  512-byte terminal ring with hardware-error and overflow accounting, blocking
+  reads use an IRQ-safe wait queue, and foreground Ctrl-C ownership is atomic;
+  the QEMU v1 gate proves an ordered 4 KiB burst and exactly 64 injected
+  overflow bytes
 
 - Phase 0: complete — freestanding build, linker layout, boot assembly, ELF,
   raw image, QEMU run/debug steps
