@@ -103,6 +103,17 @@ Run the timeout-bounded serial smoke test:
 nix develop --command zig build smoke-virt
 ```
 
+Check the Pi image, DTB handoff, UART, memory discovery, and EMMC2 error path
+on the QEMU `raspi4b` machine:
+
+```sh
+nix develop --command zig build smoke-raspi4b
+```
+
+QEMU 11 attaches its emulated SD card to the legacy Pi controller rather than
+BCM2711 EMMC2. This smoke test therefore expects a clean `STORAGE:FAILED` after
+the initramfs gate; physical hardware remains the complete Pi storage gate.
+
 Run host-native tests:
 
 ```sh

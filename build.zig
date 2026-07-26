@@ -94,6 +94,16 @@ pub fn build(b: *std.Build) void {
     const smoke_step = b.step("smoke-virt", "Boot QEMU and verify the serial marker");
     smoke_step.dependOn(&smoke.step);
 
+    const rpi_smoke = b.addSystemCommand(&.{"bash"});
+    rpi_smoke.addFileArg(b.path("scripts/smoke-raspi4b.sh"));
+    rpi_smoke.addFileArg(image.getOutput());
+    rpi_smoke.addFileArg(rpi_disk_output);
+    const rpi_smoke_step = b.step(
+        "smoke-raspi4b",
+        "Boot the Pi kernel on QEMU raspi4b and verify its supported boundary",
+    );
+    rpi_smoke_step.dependOn(&rpi_smoke.step);
+
     const native_test_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = b.graph.host,

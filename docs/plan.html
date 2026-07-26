@@ -447,7 +447,7 @@ nix develop --command zig build debug-virt</code></pre>
                 <tr><td>Compile-time checks</td><td>Context-frame offsets, descriptor masks, alignment, and platform contracts agree.</td><td>Every build</td></tr>
                 <tr><td>Native Zig tests</td><td>FDT/FAT/ELF parsers, frame allocator, run queue, and page-table calculations work on malformed and normal input.</td><td>Every change</td></tr>
                 <tr><td>QEMU virt smoke</td><td>Boot, serial, exceptions, IRQs, allocation, process isolation, and filesystem path work end to end.</td><td>Every milestone</td></tr>
-                <tr><td>QEMU raspi4b smoke</td><td>Pi image format and board-facing setup remain compatible with the emulated Pi 4 machine.</td><td>Phase 10 onward</td></tr>
+                <tr><td>QEMU raspi4b smoke</td><td>The Pi card image supplies a valid firmware DTB, direct kernel boot reaches UART, memory discovery, and initramfs loading, and EMMC2 errors fail cleanly. QEMU 11 routes its SD card to the legacy controller, so physical hardware remains the EMMC2 gate.</td><td>Phase 10 onward</td></tr>
                 <tr><td>Physical Pi 4</td><td>Phase 2 proves firmware entry, PL011, and exceptions; Phase 10 proves GIC, caches, memory map, preemption, isolation, and SD storage.</td><td>Phase 2 and every later BSP feature</td></tr>
               </tbody>
             </table>

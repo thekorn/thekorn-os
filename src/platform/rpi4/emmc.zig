@@ -134,36 +134,41 @@ pub fn initialize() DriverError!void {
     try setClock(400_000);
     delayMicros(1_000);
 
-    _ = try sendCommand(0, 0, response_none, false, 0);
+    try sendCommand(0, 0, response_none, false, 0, null);
     delayMicros(2_000);
-    const interface_condition = try sendCommand(
+    var interface_condition: u32 = undefined;
+    try sendCommand(
         8,
         0x0000_01aa,
         response_short | command_crc_check | command_index_check,
         false,
         0,
+        &interface_condition,
     );
     if (interface_condition & 0xfff != 0x1aa) return error.UnsupportedCard;
 
     const negotiation_start = counter();
     var operating_conditions: u32 = 0;
     while (true) {
-        const application = try sendCommand(
+        var application: u32 = undefined;
+        try sendCommand(
             55,
             0,
             response_short | command_crc_check | command_index_check,
             false,
             0,
+            &application,
         );
         if (application & r1_application_command == 0 or application & r1_error_mask != 0) {
             return error.InvalidResponse;
         }
-        operating_conditions = try sendCommand(
+        try sendCommand(
             41,
             0x40ff_8000,
             response_short,
             false,
             0,
+            &operating_conditions,
         );
         if (operating_conditions & ocr_ready != 0) break;
         if (timedOut(negotiation_start, 2_000)) return error.Timeout;
@@ -171,13 +176,15 @@ pub fn initialize() DriverError!void {
     }
     if (operating_conditions & ocr_high_capacity == 0) return error.UnsupportedCard;
 
-    _ = try sendCommand(2, 0, response_long | command_crc_check, false, 0);
-    const relative_address = try sendCommand(
+    try sendCommand(2, 0, response_long | command_crc_check, false, 0, null);
+    var relative_address: u32 = undefined;
+    try sendCommand(
         3,
         0,
         response_short | command_crc_check | command_index_check,
         false,
         0,
+        &relative_address,
     );
     if (relative_address & r6_error_mask != 0 or
         relative_address & card_state_mask != card_state_standby)
@@ -187,12 +194,14 @@ pub fn initialize() DriverError!void {
     state.relative_card_address = @truncate(relative_address >> 16);
     if (state.relative_card_address == 0) return error.InvalidResponse;
 
-    const selected = try sendCommand(
+    var selected: u32 = undefined;
+    try sendCommand(
         7,
         @as(u32, state.relative_card_address) << 16,
         response_short_busy | command_crc_check | command_index_check,
         false,
         0,
+        &selected,
     );
     if (selected & r1_error_mask != 0) return error.InvalidResponse;
     try setClock(25_000_000);
@@ -271,7 +280,8 @@ fn sendCommand(
     flags: u16,
     data_command: bool,
     transfer_mode: u16,
-) DriverError!u32 {
+    response_output: ?*u32,
+) DriverError!void {
     try waitForInhibit(data_command);
     writeRegister(interrupt_status, 0xffff_ffff);
     writeRegister(argument, command_argument);
@@ -284,19 +294,19 @@ fn sendCommand(
         const status = readRegister(interrupt_status);
         if (status & interrupt_error_mask != 0) {
             writeRegister(interrupt_status, status & (interrupt_error_mask | interrupt_command_complete));
-            resetLines(reset_command | if (data_command) reset_data else 0) catch {};
+            resetLines(reset_command | if (data_command) reset_data else 0);
             return error.CommandFailure;
         }
         if (status & interrupt_command_complete != 0) break;
         if (timedOut(start, 500)) {
-            resetLines(reset_command | if (data_command) reset_data else 0) catch {};
+            resetLines(reset_command | if (data_command) reset_data else 0);
             return error.Timeout;
         }
     }
     writeRegister(interrupt_status, interrupt_command_complete);
     const response = readRegister(response_0);
     if (flags & 0b11 == response_short_busy) try waitForBusy();
-    return response;
+    if (response_output) |output| output.* = response;
 }
 
 fn waitForInhibit(data_command: bool) DriverError!void {
@@ -316,24 +326,26 @@ fn waitForBusy() DriverError!void {
     }
 }
 
-fn resetLines(lines: u32) DriverError!void {
+fn resetLines(lines: u32) void {
     state.control_1 |= lines;
     writeRegister(clock_timeout_reset, state.control_1);
     const start = counter();
     while (readRegister(clock_timeout_reset) & lines != 0) {
-        if (timedOut(start, 100)) return error.Timeout;
+        if (timedOut(start, 100)) break;
     }
     state.control_1 &= ~lines;
 }
 
 fn readRawSector(sector: u32, destination: *[sector_size]u8) DriverError!void {
     writeRegister(block_size_count, 0x0001_0200);
-    const response = try sendCommand(
+    var response: u32 = undefined;
+    try sendCommand(
         17,
         sector,
         response_short | command_crc_check | command_index_check,
         true,
         transfer_block_count_enable | transfer_read,
+        &response,
     );
     if (response & r1_error_mask != 0) return error.InvalidResponse;
 
@@ -341,7 +353,7 @@ fn readRawSector(sector: u32, destination: *[sector_size]u8) DriverError!void {
     while (true) {
         const status = readRegister(interrupt_status);
         if (status & interrupt_error_mask != 0) {
-            resetLines(reset_data) catch {};
+            resetLines(reset_data);
             return error.DataFailure;
         }
         if (status & interrupt_buffer_read_ready != 0) break;
@@ -362,7 +374,7 @@ fn readRawSector(sector: u32, destination: *[sector_size]u8) DriverError!void {
     while (true) {
         const status = readRegister(interrupt_status);
         if (status & interrupt_error_mask != 0) {
-            resetLines(reset_data) catch {};
+            resetLines(reset_data);
             return error.DataFailure;
         }
         if (status & interrupt_transfer_complete != 0) break;
