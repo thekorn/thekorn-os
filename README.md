@@ -1,5 +1,7 @@
 # thekorn-os
 
+![thekorn-os graphical boot scene](docs/virt-graphics.png)
+
 `thekorn-os` is a small AArch64 learning operating system written in Zig. The
 project is developed QEMU-first and shares the same platform-neutral kernel
 with the Raspberry Pi 4 (BCM2711) port.
