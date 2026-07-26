@@ -25,7 +25,15 @@ const mailbox_empty: u32 = 1 << 30;
 const mailbox_full: u32 = 1 << 31;
 const property_channel: u32 = 8;
 const get_clock_rate: u32 = 0x0003_0002;
+const get_max_clock_rate: u32 = 0x0003_0004;
+const set_power_state: u32 = 0x0002_8001;
+const set_gpio_state: u32 = 0x0003_8041;
 const emmc2_clock_id: u32 = 12;
+const emmc2_fallback_clock_hz: u32 = 100_000_000;
+const sd_card_device_id: u32 = 0;
+const sd_io_voltage_gpio: u32 = 132;
+const property_response_success: u32 = 0x8000_0000;
+const property_response_bit: u32 = 0x8000_0000;
 
 const block_size_count = 0x04;
 const argument = 0x08;
@@ -82,6 +90,8 @@ const user_partition_type: u8 = 0x0e;
 const DriverError = error{
     Timeout,
     MailboxFailure,
+    VoltageSetupFailure,
+    PowerSetupFailure,
     UnsupportedCard,
     InvalidResponse,
     CommandFailure,
@@ -100,6 +110,11 @@ const State = struct {
     partition: Partition = .{ .start = 0, .count = 0 },
     slow_clock: bool = true,
     control_1: u32 = 0,
+    last_command: u8 = 0xff,
+    last_interrupt_status: u32 = 0,
+    last_property_tag: u32 = 0,
+    last_property_code: u32 = 0,
+    last_property_length: u32 = 0,
 };
 
 const ClockMessage = extern struct {
@@ -113,24 +128,52 @@ const ClockMessage = extern struct {
     end: u32,
 };
 
+const GpioMessage = extern struct {
+    size: u32,
+    code: u32,
+    tag: u32,
+    value_size: u32,
+    value_length: u32,
+    gpio: u32,
+    gpio_state: u32,
+    end: u32,
+};
+
+const PowerMessage = extern struct {
+    size: u32,
+    code: u32,
+    tag: u32,
+    value_size: u32,
+    value_length: u32,
+    device_id: u32,
+    power_state: u32,
+    end: u32,
+};
+
 var state: State = .{};
 var clock_message: ClockMessage align(64) = undefined;
+var gpio_message: GpioMessage align(64) = undefined;
+var power_message: PowerMessage align(64) = undefined;
 
 pub fn initialize() DriverError!void {
     state = .{};
-    state.base_clock_hz = try queryBaseClock();
+    configureIoVoltage() catch return error.VoltageSetupFailure;
+    delayMicros(5_000);
+    powerOnCard() catch return error.PowerSetupFailure;
+    state.base_clock_hz = queryBaseClock();
 
     writeRegister(interrupt_signal_enable, 0);
     try resetHost();
 
-    // Clear 1.8 V signaling and enable 3.3 V SD bus power. BCM2711 EMMC2
-    // requires 32-bit accesses even for packed byte and half-word registers.
-    writeRegister(host_control_2, readRegister(host_control_2) & ~@as(u32, 1 << 19));
+    // Discard firmware high-speed state and enable 3.3 V SD bus power. BCM2711
+    // EMMC2 requires 32-bit accesses even for packed byte registers.
+    writeRegister(host_control_2, 0);
     writeRegister(host_power_control, 0x0000_0f00);
+    delayMicros(2_000);
     writeRegister(interrupt_status, 0xffff_ffff);
     writeRegister(interrupt_enable, enabled_interrupts);
     try setClock(400_000);
-    delayMicros(1_000);
+    delayMicros(2_000);
 
     try sendCommand(0, 0, response_none, false, 0, null);
     delayMicros(2_000);
@@ -215,6 +258,34 @@ pub fn blockCount() u64 {
     return state.partition.count;
 }
 
+pub fn baseClockHz() u32 {
+    return state.base_clock_hz;
+}
+
+pub fn interruptStatus() u32 {
+    return state.last_interrupt_status;
+}
+
+pub fn presentState() u32 {
+    return readRegister(present_state);
+}
+
+pub fn lastCommand() u8 {
+    return state.last_command;
+}
+
+pub fn propertyTag() u32 {
+    return state.last_property_tag;
+}
+
+pub fn propertyCode() u32 {
+    return state.last_property_code;
+}
+
+pub fn propertyLength() u32 {
+    return state.last_property_length;
+}
+
 pub fn readBlocks(
     context_pointer: *anyopaque,
     first_block: u64,
@@ -278,6 +349,8 @@ fn sendCommand(
     transfer_mode: u16,
     response_output: ?*u32,
 ) DriverError!void {
+    state.last_command = index;
+    state.last_interrupt_status = 0;
     try waitForInhibit(data_command);
     writeRegister(interrupt_status, 0xffff_ffff);
     writeRegister(argument, command_argument);
@@ -288,6 +361,7 @@ fn sendCommand(
     const start = counter();
     while (true) {
         const status = readRegister(interrupt_status);
+        state.last_interrupt_status = status;
         if (status & interrupt_error_mask != 0) {
             writeRegister(interrupt_status, status & (interrupt_error_mask | interrupt_command_complete));
             resetLines(reset_command | if (data_command) reset_data else 0);
@@ -348,6 +422,7 @@ fn readRawSector(sector: u32, destination: *[sector_size]u8) DriverError!void {
     const ready_start = counter();
     while (true) {
         const status = readRegister(interrupt_status);
+        state.last_interrupt_status = status;
         if (status & interrupt_error_mask != 0) {
             resetLines(reset_data);
             return error.DataFailure;
@@ -369,6 +444,7 @@ fn readRawSector(sector: u32, destination: *[sector_size]u8) DriverError!void {
     const complete_start = counter();
     while (true) {
         const status = readRegister(interrupt_status);
+        state.last_interrupt_status = status;
         if (status & interrupt_error_mask != 0) {
             resetLines(reset_data);
             return error.DataFailure;
@@ -395,21 +471,94 @@ fn findUserPartition(master_boot_record: *const [sector_size]u8) DriverError!Par
     return error.UserPartitionNotFound;
 }
 
-fn queryBaseClock() DriverError!u32 {
-    clock_message = .{
-        .size = @sizeOf(ClockMessage),
-        .code = 0,
-        .tag = get_clock_rate,
-        .value_size = 8,
-        .value_length = 4,
-        .clock_id = emmc2_clock_id,
-        .rate_hz = 0,
-        .end = 0,
+fn configureIoVoltage() DriverError!void {
+    const words: *[8]u32 = @ptrCast(&gpio_message);
+    initializePropertyMessage(words, set_gpio_state, 8, sd_io_voltage_gpio, 0);
+    submitProperty(@intFromPtr(&gpio_message)) catch |property_error| {
+        recordProperty(set_gpio_state, gpio_message.code, gpio_message.value_length);
+        return property_error;
     };
-    const physical = @intFromPtr(&clock_message);
+    recordProperty(set_gpio_state, gpio_message.code, gpio_message.value_length);
+    // Firmware versions disagree on whether this set operation returns its
+    // payload. Overall message success is the authoritative result.
+    if (gpio_message.code != property_response_success) return error.MailboxFailure;
+}
+
+fn powerOnCard() DriverError!void {
+    const words: *[8]u32 = @ptrCast(&power_message);
+    initializePropertyMessage(words, set_power_state, 8, sd_card_device_id, 1 | 2);
+    submitProperty(@intFromPtr(&power_message)) catch |property_error| {
+        recordProperty(set_power_state, power_message.code, power_message.value_length);
+        return property_error;
+    };
+    recordProperty(set_power_state, power_message.code, power_message.value_length);
+    if (power_message.code != property_response_success) return error.MailboxFailure;
+    if (power_message.value_length & 0x7fff_ffff != 0) {
+        if (power_message.power_state & 1 == 0 or power_message.power_state & 2 != 0) {
+            return error.MailboxFailure;
+        }
+    }
+}
+
+fn queryBaseClock() u32 {
+    var current_rate: u32 = 0;
+    queryClockRate(get_clock_rate, &current_rate) catch {};
+    if (current_rate != 0) return current_rate;
+    var maximum_rate: u32 = 0;
+    queryClockRate(get_max_clock_rate, &maximum_rate) catch {};
+    return if (maximum_rate != 0) maximum_rate else emmc2_fallback_clock_hz;
+}
+
+fn queryClockRate(tag: u32, rate_output: *u32) DriverError!void {
+    const words: *[8]u32 = @ptrCast(&clock_message);
+    initializePropertyMessage(words, tag, 4, emmc2_clock_id, 0);
+    submitProperty(@intFromPtr(&clock_message)) catch |property_error| {
+        recordProperty(tag, clock_message.code, clock_message.value_length);
+        return property_error;
+    };
+    recordProperty(tag, clock_message.code, clock_message.value_length);
+    if (clock_message.code != property_response_success or
+        clock_message.tag != tag or
+        clock_message.value_length & property_response_bit == 0 or
+        clock_message.value_length & 0x7fff_ffff < 8 or
+        clock_message.clock_id != emmc2_clock_id)
+    {
+        return error.MailboxFailure;
+    }
+    rate_output.* = clock_message.rate_hz;
+}
+
+fn initializePropertyMessage(
+    words: *[8]u32,
+    tag: u32,
+    request_length: u32,
+    first_value: u32,
+    second_value: u32,
+) void {
+    writePropertyWord(&words[0], @sizeOf(ClockMessage));
+    writePropertyWord(&words[1], 0);
+    writePropertyWord(&words[2], tag);
+    writePropertyWord(&words[3], 8);
+    writePropertyWord(&words[4], request_length);
+    writePropertyWord(&words[5], first_value);
+    writePropertyWord(&words[6], second_value);
+    writePropertyWord(&words[7], 0);
+}
+
+fn writePropertyWord(word: *u32, value: u32) void {
+    @as(*volatile u32, word).* = value;
+}
+
+fn recordProperty(tag: u32, code: u32, length: u32) void {
+    state.last_property_tag = tag;
+    state.last_property_code = code;
+    state.last_property_length = length;
+}
+
+fn submitProperty(physical: usize) DriverError!void {
     if (physical >= 0x4000_0000 or physical & 0xf != 0) return error.MailboxFailure;
     const bus_address: u32 = @intCast(physical | 0xc000_0000);
-    cacheClean(@intFromPtr(&clock_message));
+    cacheClean(physical);
     asm volatile ("dsb sy" ::: .{ .memory = true });
 
     var start = counter();
@@ -428,18 +577,8 @@ fn queryBaseClock() DriverError!u32 {
         if (timedOut(start, 100)) return error.Timeout;
     }
     asm volatile ("dsb sy" ::: .{ .memory = true });
-    cacheInvalidate(@intFromPtr(&clock_message));
+    cacheInvalidate(physical);
     asm volatile ("dsb sy" ::: .{ .memory = true });
-    if (clock_message.code != 0x8000_0000 or
-        clock_message.tag != get_clock_rate or
-        clock_message.value_length & 0x8000_0000 == 0 or
-        clock_message.value_length & 0x7fff_ffff < 8 or
-        clock_message.clock_id != emmc2_clock_id or
-        clock_message.rate_hz == 0)
-    {
-        return error.MailboxFailure;
-    }
-    return clock_message.rate_hz;
 }
 
 fn writeRegister(offset: usize, value: u32) void {

@@ -145,6 +145,8 @@ fn runScheduler() noreturn {
         @atomicStore(usize, item.progressPointer(), 0, .release);
         @atomicStore(usize, item.ticksPointer(), 0, .release);
         @atomicStore(usize, item.identityPointer(), 0, .release);
+        item.uartProbePointer().* = uart.user_uart_probe_address;
+        item.kernelProbePointer().* = physicalMappedAddress(@intFromPtr(&__kernel_start));
         item.started = 0;
         item.exited = 0;
         item.exit_status = 0;
@@ -431,7 +433,21 @@ fn loadProcessesFromInitramfs() void {
 }
 
 fn loadProcessesFromFat() void {
-    uart.block.initialize() catch storageFailed();
+    uart.block.initialize() catch |driver_error| {
+        if (comptime build_options.graphics_rpi4) {
+            KernelConsole.write("EMMC2:ERROR=");
+            KernelConsole.write(@errorName(driver_error));
+            KernelConsole.write("\n");
+            KernelConsole.writeHex("EMMC2:PROPERTY_TAG=", uart.block.propertyTag());
+            KernelConsole.writeHex("EMMC2:PROPERTY_CODE=", uart.block.propertyCode());
+            KernelConsole.writeHex("EMMC2:PROPERTY_LENGTH=", uart.block.propertyLength());
+            KernelConsole.writeHex("EMMC2:BASE_CLOCK_HZ=", uart.block.baseClockHz());
+            KernelConsole.writeHex("EMMC2:LAST_CMD=", uart.block.lastCommand());
+            KernelConsole.writeHex("EMMC2:INTERRUPT_STATUS=", uart.block.interruptStatus());
+            KernelConsole.writeHex("EMMC2:PRESENT_STATE=", uart.block.presentState());
+        }
+        storageFailed();
+    };
     const device: block_device.BlockDevice = .{
         .context = uart.block.context(),
         .readBlocks = uart.block.readBlocks,
@@ -770,7 +786,11 @@ fn handleUserFault(vector: usize, frame: *exceptions.Frame) bool {
     switch (item.expected_fault) {
         .none => return false,
         .uart => {
-            if (frame.far != 0x0900_0000 or fault_status != permission_fault_level_three) return false;
+            if (frame.far != uart.user_uart_probe_address or
+                fault_status != permission_fault_level_three)
+            {
+                return false;
+            }
             item.expected_fault = .kernel;
             KernelConsole.writeHex("PROCESS:UART_DENIED=", currentProcessIndex().? + 1);
         },

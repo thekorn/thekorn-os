@@ -10,20 +10,19 @@ Raspberry Pi 4 image whose kernel loads at `0x80000`. Both targets enter EL1h,
 install a complete AArch64 exception vector table, initialize their platform's
 PL011 UART, and report boot and exception facts over serial. Both platform
 implementations configure a GICv2-compatible interrupt controller and the Arm
-generic physical timer; the complete Pi path awaits its hardware gate. See the
-[v0 implementation plan](docs/plan.html) for the current roadmap and phase
-status, and the [proposed v1 plan](docs/v1-plan.html) for the post-v0
+generic physical timer; the complete Pi path is verified on physical hardware.
+See the [v0 implementation plan](docs/plan.html) for the current roadmap and
+phase status, and the [proposed v1 plan](docs/v1-plan.html) for the post-v0
 interactive-system roadmap.
 Both targets consume the firmware-provided device tree to discover RAM and
 reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
-The Phase 2 baseline is verified on a physical Pi 4 through the deliberate
-exception return and final `BOOT:OK` marker. The current image builds a sparse
+The complete image is verified on a physical Pi 4 through the deliberate
+exception return and final `BOOT:OK` marker. It builds a sparse
 four-level identity map, enables the EL1 MMU and caches, then moves the kernel,
 stack, and exception vectors into a protected `TTBR1_EL1` high-half mapping.
 The low kernel alias is removed while device mappings remain available through
-the active `TTBR0_EL1` root. QEMU verifies this transition and page-granular
-W^X permissions; the updated image still needs the complete physical-board
-gate.
+the active `TTBR0_EL1` root. QEMU and physical Pi 4 runs verify this transition,
+page-granular W^X permissions, and the complete hardware gate.
 
 The Phase 9 QEMU gate first loads two AArch64 ELF programs from a deterministic
 embedded `newc` initramfs, then reloads them from a deterministic 4 MiB FAT16
@@ -114,7 +113,11 @@ nix develop --command zig build smoke-raspi4b
 
 QEMU 11 attaches its emulated SD card to the legacy Pi controller rather than
 BCM2711 EMMC2. This smoke test therefore expects a clean `STORAGE:FAILED` after
-the initramfs gate; physical hardware remains the complete Pi storage gate.
+the initramfs gate. This failure is intentional only under QEMU and does not
+show that EMMC2 works or that the generated card image is invalid. Physical
+hardware is the authoritative Pi storage gate. A physical EMMC2 initialization
+failure also reports the driver error, last command, interrupt status, and
+present state before `STORAGE:FAILED`.
 
 After writing the generated image to a card and connecting a 3.3 V serial
 adapter, validate the complete physical-hardware marker contract with:
@@ -206,8 +209,8 @@ headless `run-virt` and `smoke-virt` profiles remain unchanged.
 The existing Pi 4 kernel also requests an RGB 32-bit framebuffer from the
 firmware property mailbox, renders through the same pitch-aware software
 renderer, and reports `GRAPHICS:RPI4_OK` on success. Failure is non-fatal and
-reported as `GRAPHICS:FAILED`. HDMI/physical-board evidence is intentionally
-deferred; this status describes the software implementation only.
+reported as `GRAPHICS:FAILED`. Physical Pi serial and HDMI evidence verify the
+mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
 
 ## Project status
 
@@ -217,33 +220,34 @@ deferred; this status describes the software implementation only.
   automated smoke test
 - Phase 2: complete — EL1 exception handling and the Raspberry Pi 4 GPIO/PL011
   image are verified on physical hardware
-- Phase 3: complete — QEMU GICv2 routing, generic physical timer interrupts,
-  monotonic tick accounting, and the 1,000-tick smoke-test gate
+- Phase 3: complete — GICv2 routing, generic physical timer interrupts,
+  monotonic tick accounting, and the 1,000-tick gate are verified on QEMU and
+  physical Pi 4
 - Phase 4: complete — DTB RAM/reservation discovery, 4 KiB bitmap frame
-  allocation, host tests, and the QEMU allocation-sweep gate
-- Phase 5: implemented — the protected identity map, high-half `TTBR1_EL1`
-  transition, low-alias removal, W^X fault probes, and QEMU gate are
-  implemented; physical-board validation remains
-- Phase 6: complete on QEMU — three separate kernel stacks, cooperative yields,
+  allocation, host tests, and the allocation-sweep gate are verified on QEMU
+  and physical Pi 4
+- Phase 5: complete — the protected identity map, high-half `TTBR1_EL1`
+  transition, low-alias removal, and W^X fault probes are verified on QEMU and
+  physical Pi 4
+- Phase 6: complete — three separate kernel stacks, cooperative yields,
   exception-return context switching, FP/SIMD trapping, and timer preemption
-  are enforced by the smoke gate
-- Phase 7: complete on QEMU — task 2 enters EL0, uses the versioned
-  `write`/`yield`/`exit`/bounded-growth ABI, is timer-preempted, and cannot
-  directly access UART or kernel memory
-- Phase 8: complete on QEMU — two embedded Zig ELF processes run at identical
+  are enforced by the QEMU and physical-hardware smoke gates
+- Phase 7: complete — both processes enter EL0, use the versioned
+  `write`/`yield`/`exit`/bounded-growth ABI, are timer-preempted, and cannot
+  directly access UART or kernel memory on QEMU and Pi 4
+- Phase 8: complete — two embedded Zig ELF processes run at identical
   virtual addresses with independent backing, `TTBR0_EL1` roots, user stacks,
-  data, and bounded heaps; physical-board validation remains deferred
-- Phase 9: complete on QEMU — deterministic initramfs and FAT16 images, a
-  polling modern virtio-mmio block driver, a read-only block-device contract,
-  and host-tested FAT16/32 parsing feed the isolated two-process smoke gate
-- Phase 10: implemented — the Pi 4 BSP configures the BCM2711 GIC-400 and Arm
+  data, and bounded heaps on QEMU and Pi 4
+- Phase 9: complete — deterministic initramfs and FAT16 images, polling block
+  drivers, a read-only block-device contract, and host-tested FAT16/32 parsing
+  feed the isolated two-process smoke gate on QEMU and Pi 4
+- Phase 10: complete — the Pi 4 BSP configures the BCM2711 GIC-400 and Arm
   generic physical timer, reads its FAT16 user partition through a polling
-  EMMC2 driver, and feeds the existing preemptive two-process demo; complete
-  physical-board validation remains
+  EMMC2 driver, and completes the preemptive two-process demo and full serial
+  hardware gate through `BOOT:OK`
 - Graphics G0: complete — the fixed 800 × 600 XRGB8888 scene/display contract,
   serial outcome markers, and opt-in QEMU virtio-gpu run profile are
-  host-testable; device initialization and all physical-hardware evidence are
-  deferred to later graphics gates
+  host-testable and verified by the later QEMU and Pi graphics gates
 - Graphics G1: complete — the allocation-free software renderer clips pixels,
   rectangles, integer lines, and fixed 8 × 8 glyphs; tests cover padded pitch,
   empty and malformed surfaces, edge clipping, channel order, and the complete
@@ -260,18 +264,17 @@ deferred; this status describes the software implementation only.
 - Graphics G4: complete — the bounded QMP smoke gate requires a clean full boot,
   captures the actual QEMU scanout, and verifies 800 × 600 geometry plus stable
   background, panel, accent, and glyph colors before retaining the PPM
-- Graphics G5: implemented — the Pi 4 property mailbox requests physical and
+- Graphics G5: complete — the Pi 4 property mailbox requests physical and
   virtual geometry, RGB depth/order, a page-aligned allocation, and pitch;
-  validated firmware results feed the shared renderer, and QEMU `raspi4b`
-  reaches `GRAPHICS:RPI4_OK` before its known storage boundary. Physical HDMI
-  evidence remains explicitly deferred
-- Graphics G6: software-complete — absent displays fall back without hiding
+  validated firmware results feed the shared renderer, physical serial emits
+  `GRAPHICS:RPI4_OK`, and HDMI evidence confirms the visible scene
+- Graphics G6: complete — absent displays fall back without hiding
   serial boot, malformed protocol data, unsupported formats, allocation limits,
   and arithmetic bounds are tested, and both headless and visible-pixel QEMU
-  gates remain reproducible. Physical Pi capture is the only deferred gate
+  gates remain reproducible alongside the complete physical Pi evidence
 
 The focused
 [first graphical output plan](docs/graphics-plan.html) tracks the work toward a
 shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
 framebuffer parity while keeping serial diagnostics authoritative. Physical
-hardware verification is intentionally deferred and is not claimed complete.
+hardware verification and board parity are complete.

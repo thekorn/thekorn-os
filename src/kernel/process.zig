@@ -147,6 +147,14 @@ pub const Process = struct {
         return @ptrFromInt(@intFromPtr(&self.memory.data) + 2 * @sizeOf(usize));
     }
 
+    pub fn uartProbePointer(self: *Process) *u64 {
+        return @ptrFromInt(@intFromPtr(&self.memory.data) + 3 * @sizeOf(u64));
+    }
+
+    pub fn kernelProbePointer(self: *Process) *u64 {
+        return @ptrFromInt(@intFromPtr(&self.memory.data) + 4 * @sizeOf(u64));
+    }
+
     pub fn heapIdentityPointer(self: *Process) *u64 {
         return @ptrCast(@alignCast(&self.memory.heap));
     }

@@ -11,6 +11,7 @@ pub const gpu = @import("framebuffer.zig");
 
 const gpio_base = 0xfe20_0000;
 const uart_base = 0xfe20_1000;
+pub const user_uart_probe_address = uart_base;
 pub const mmio_regions = [_]struct { start: u64, end: u64 }{
     .{ .start = 0xfe00_b000, .end = 0xfe00_c000 },
     .{ .start = gpio_base, .end = uart_base + 0x1000 },

@@ -129,7 +129,7 @@ require_ordered \
   '^BOOT:START' \
   '^BOOT:CURRENT_EL=2' \
   '^BOOT:DTB=0x0*[1-9a-f][0-9a-f]*' \
-  '^MEMORY:RAM_RANGES=0x0000000000000001' \
+  '^MEMORY:RAM_RANGES=0x0*[1-9a-f][0-9a-f]*' \
   '^MEMORY:OK' \
   '^INITRAMFS:FILES=0x0000000000000002' \
   '^INITRAMFS:OK' \

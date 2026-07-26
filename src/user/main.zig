@@ -4,8 +4,7 @@ const syscall = @import("syscall");
 
 const user_data_address = 0x0042_0000;
 const user_heap_address = 0x0043_0000;
-const uart_address = 0x0900_0000;
-const kernel_physical_address = 0x4008_0000;
+const invalid_user_address = 0x4008_0000;
 const progress_target = 10_000;
 const tick_target = 100;
 const heap_page_limit = 4;
@@ -16,7 +15,7 @@ pub export fn _start() callconv(.c) noreturn {
     const stack_ok = if (options.process_id == 1) "PROCESS1:STACK_OK\n" else "PROCESS2:STACK_OK\n";
     const done = if (options.process_id == 1) "PROCESS1:OK\n" else "PROCESS2:OK\n";
     if (invoke(.write, @intFromPtr(hello.ptr), hello.len) != hello.len) fail();
-    if (invoke(.write, kernel_physical_address, 8) != syscall.errorResult(.invalid_address)) fail();
+    if (invoke(.write, invalid_user_address, 8) != syscall.errorResult(.invalid_address)) fail();
     if (invokeRaw(0, 0, 0) != syscall.errorResult(.invalid_syscall)) fail();
 
     const heap = invoke(.grow, 1, 0);
@@ -31,13 +30,15 @@ pub export fn _start() callconv(.c) noreturn {
     const progress: *volatile usize = @ptrFromInt(user_data_address);
     const ticks: *volatile usize = @ptrFromInt(user_data_address + @sizeOf(usize));
     const identity: *volatile usize = @ptrFromInt(user_data_address + 2 * @sizeOf(usize));
+    const uart_probe: *const volatile u64 = @ptrFromInt(user_data_address + 3 * @sizeOf(u64));
+    const kernel_probe: *const volatile u64 = @ptrFromInt(user_data_address + 4 * @sizeOf(u64));
     identity.* = options.process_id;
     while (progress.* < progress_target) progress.* += 1;
     while (ticks.* < tick_target) asm volatile ("" ::: .{ .memory = true });
 
-    const uart: *const volatile u32 = @ptrFromInt(uart_address);
+    const uart: *const volatile u32 = @ptrFromInt(uart_probe.*);
     _ = uart.*;
-    const kernel: *const volatile u64 = @ptrFromInt(kernel_physical_address);
+    const kernel: *const volatile u64 = @ptrFromInt(kernel_probe.*);
     _ = kernel.*;
 
     if (invoke(.write, @intFromPtr(done.ptr), done.len) != done.len) fail();

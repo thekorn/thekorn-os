@@ -234,6 +234,7 @@
     .checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 24px; margin: 0; padding: 0; list-style: none; }
     .checklist li { position: relative; padding-left: 24px; }
     .checklist li::before { content: "□"; position: absolute; left: 0; color: var(--green); font-weight: 900; }
+    .checklist.complete li::before { content: "✓"; }
     footer { padding-top: 20px; border-top: 1.5px solid var(--border); color: var(--muted); font-size: 12px; }
 
     @media (max-width: 980px) {
@@ -280,7 +281,7 @@
         <p class="eyebrow">Focused roadmap · post-v0 alternative</p>
         <h1>Put the first pixels on screen</h1>
         <p class="lede">A deliberately narrow graphics milestone: render a deterministic kernel-owned image through QEMU, then prove the same drawing code on Raspberry Pi 4. No desktop, terminal, input stack, or userspace graphics API yet.</p>
-        <div class="metadata"><span>Baseline · v0 complete</span><span>Primary target · QEMU virt</span><span>Parity target · Pi 4</span></div>
+        <div class="metadata"><span>Status · complete</span><span>QEMU virt · verified</span><span>Pi 4 · hardware verified</span></div>
       </div>
       <div class="screen" aria-label="Conceptual preview of the first graphical output">
         <div class="pixels"></div>
@@ -291,7 +292,7 @@
     <div class="summary-grid" aria-label="Plan summary">
       <article class="summary-card"><span class="label">Release promise</span><strong>A verified image</strong><span>One scene, both targets</span></article>
       <article class="summary-card"><span class="label">QEMU backend</span><strong>virtio-gpu 2D</strong><span>MMIO transport, polling first</span></article>
-      <article class="summary-card"><span class="label">Pi backend</span><strong>Mailbox framebuffer</strong><span>Firmware property interface</span></article>
+      <article class="summary-card"><span class="label">Pi backend</span><strong>Mailbox framebuffer</strong><span>Firmware property interface · verified</span></article>
       <article class="summary-card"><span class="label">Keep stable</span><strong>UART diagnostics</strong><span>Serial remains authoritative</span></article>
     </div>
 
@@ -345,15 +346,15 @@
         <section id="milestones">
           <div class="section-head"><span class="section-number">04</span><h2>Build in seven reviewable gates</h2></div>
           <p class="section-intro">Every gate leaves serial boot intact and has a narrow exit condition. Land portable rendering before either hardware backend so most behavior is host-testable.</p>
-          <p class="callout"><strong>Implementation state:</strong> G0–G6 are software-complete. The visible-pixel QEMU gate now also boots without a GPU and requires a non-fatal <code>GRAPHICS:FAILED</code> outcome, while host tests cover malformed protocol data, unsupported formats, allocation limits, and arithmetic bounds. QEMU <code>raspi4b</code> reaches <code>GRAPHICS:RPI4_OK</code> before its known storage boundary. Physical Pi HDMI verification remains deferred by project decision, so board parity is not claimed complete.</p>
+          <p class="callout"><strong>Implementation state:</strong> G0–G6 are complete on QEMU and Raspberry Pi 4. The visible-pixel QEMU gate also boots without a GPU and requires a non-fatal <code>GRAPHICS:FAILED</code> outcome, while host tests cover malformed protocol data, unsupported formats, allocation limits, and arithmetic bounds. Physical Pi evidence confirms <code>GRAPHICS:RPI4_OK</code>, visible HDMI scanout, and an unchanged full serial boot through <code>BOOT:OK</code>. Board parity is verified.</p>
           <div class="timeline">
             <article class="milestone"><div class="phase">G0</div><div class="milestone-body"><span class="badge yes">Contract</span><h3>Freeze the scene and display boundary</h3><p>Specify the exact scene, XRGB8888 channel layout, preferred dimensions, clipping rules, serial markers, and failure policy. Add the virtio-gpu device only to a new graphics QEMU run profile.</p><div class="tags"><span class="tag">No pixel output yet</span><span class="tag">UART unchanged</span></div><div class="exit"><strong>Exit:</strong> contracts and marker sequence are testable without device access.</div></div></article>
             <article class="milestone"><div class="phase">G1</div><div class="milestone-body"><span class="badge yes">Portable</span><h3>Implement the software framebuffer renderer</h3><p>Add clear, clipped rectangle, line, and fixed 8×8 glyph routines over caller-provided memory. Test padded pitch, edge clipping, zero-sized surfaces, and exact output hashes on the host.</p><div class="tags"><span class="tag">Host tests</span><span class="tag">No allocation</span></div><div class="exit"><strong>Exit:</strong> a deterministic buffer hash proves the complete scene.</div></div></article>
             <article class="milestone"><div class="phase">G2</div><div class="milestone-body"><span class="badge risk">Foundation</span><h3>Extract a reusable virtio-mmio transport core</h3><p>Reuse the block driver’s negotiation, queue layout, descriptor submission, notification, and completion logic without forcing block and GPU requests through a block-shaped API. Preserve the existing storage smoke gate.</p><div class="tags"><span class="tag">Transport only</span><span class="tag">Block regression</span></div><div class="exit"><strong>Exit:</strong> virtio-block still passes and a synthetic queue test covers descriptor lifecycle.</div></div></article>
             <article class="milestone"><div class="phase">G3</div><div class="milestone-body"><span class="badge platform">QEMU</span><h3>Bring up virtio-gpu 2D scanout</h3><p>Discover the GPU DTB node, negotiate required features, query display info, create a 2D resource, attach page-backed memory, select scanout 0, then issue transfer-to-host and resource-flush commands.</p><div class="tags"><span class="tag">Polling</span><span class="tag">Control queue</span><span class="tag">Scanout 0</span></div><div class="exit"><strong>Exit:</strong> QEMU displays the scene and serial emits <code>GRAPHICS:QEMU_OK</code>.</div></div></article>
             <article class="milestone"><div class="phase">G4</div><div class="milestone-body"><span class="badge yes">Automation</span><h3>Verify visible pixels, not only guest memory</h3><p>Add a graphics smoke script that boots with a display backend and QMP socket, waits for the serial marker, captures a QEMU screenshot, and checks dimensions plus a few stable color regions or a normalized image digest.</p><div class="tags"><span class="tag">Timeout bounded</span><span class="tag">Screenshot artifact</span></div><div class="exit"><strong>Exit:</strong> corruption, missing flushes, and wrong channel order fail automatically.</div></div></article>
-            <article class="milestone"><div class="phase">G5</div><div class="milestone-body"><span class="badge platform">Implemented</span><h3>Acquire a framebuffer through the firmware mailbox</h3><p>Property-channel requests cover physical and virtual size, 32-bit depth, RGB pixel order, allocation, and pitch. Every response is validated and the returned bus address is converted before the shared renderer receives it.</p><div class="tags"><span class="tag">Firmware boundary</span><span class="tag">Cache visibility</span><span class="tag">Physical evidence deferred</span></div><div class="exit"><strong>Software exit:</strong> the Pi kernel presents the scene and emits <code>GRAPHICS:RPI4_OK</code> when firmware accepts the request. Physical HDMI confirmation is deferred and not claimed.</div></div></article>
-            <article class="milestone"><div class="phase">G6</div><div class="milestone-body"><span class="badge yes">Release</span><h3>Harden failures and document the checkpoint</h3><p>Test absent displays, malformed responses, unsupported formats, allocation failure, and arithmetic overflow. Keep the headless v0 smoke tests unchanged; add graphics as an explicit opt-in gate and document monitor/capture workflows.</p><div class="tags"><span class="tag">Graceful fallback</span><span class="tag">README</span><span class="tag">Pi evidence</span></div><div class="exit"><strong>Exit:</strong> graphics is additive, reproducible, and does not regress serial-only boot.</div></div></article>
+            <article class="milestone"><div class="phase">G5</div><div class="milestone-body"><span class="badge platform">Pi verified</span><h3>Acquire a framebuffer through the firmware mailbox</h3><p>Property-channel requests cover physical and virtual size, 32-bit depth, RGB pixel order, allocation, and pitch. Every response is validated and the returned bus address is converted before the shared renderer receives it.</p><div class="tags"><span class="tag">Firmware boundary</span><span class="tag">Cache visibility</span><span class="tag">Physical evidence complete</span></div><div class="exit"><strong>Exit verified on physical Pi 4:</strong> the firmware accepts the request, the kernel renders and presents the scene, serial emits <code>GRAPHICS:RPI4_OK</code>, and HDMI capture confirms visible output.</div></div></article>
+            <article class="milestone"><div class="phase">G6</div><div class="milestone-body"><span class="badge yes">Complete</span><h3>Harden failures and document the checkpoint</h3><p>Test absent displays, malformed responses, unsupported formats, allocation failure, and arithmetic overflow. Keep the headless v0 smoke tests unchanged; add graphics as an explicit opt-in gate and document monitor/capture workflows.</p><div class="tags"><span class="tag">Graceful fallback</span><span class="tag">README</span><span class="tag">Pi evidence</span></div><div class="exit"><strong>Exit verified:</strong> graphics is additive and reproducible, QEMU screenshot checks and physical Pi HDMI evidence agree, and the complete serial-only boot still reaches <code>BOOT:OK</code>.</div></div></article>
           </div>
         </section>
 
@@ -368,7 +369,7 @@
                 <tr><td>QEMU guest markers</td><td>Discovery, feature negotiation, queue completion, response validation, framebuffer allocation, and successful present.</td><td><code>GRAPHICS:INIT</code> → <code>GRAPHICS:QEMU_OK</code></td></tr>
                 <tr><td>QEMU screenshot</td><td>The device actually scanned out the expected pixels after transfer and flush.</td><td>PPM dimensions and stable region colors/digest</td></tr>
                 <tr><td>Existing smoke gate</td><td>Storage, scheduling, processes, MMU, and serial-only boot remain unchanged.</td><td><code>zig build smoke-virt</code></td></tr>
-                <tr><td>Physical Pi evidence</td><td>Mailbox address translation, pitch, cache visibility, and HDMI scanout work on the real board.</td><td>Serial transcript plus captured display photo</td></tr>
+                <tr><td>Physical Pi evidence</td><td>Mailbox address translation, pitch, cache visibility, and HDMI scanout work on the real board.</td><td>Complete · serial transcript and display capture</td></tr>
               </tbody>
             </table>
           </div>
@@ -411,9 +412,9 @@ nix develop --command zig build test</code></pre></div>
 
         <section id="done">
           <div class="section-head"><span class="section-number">08</span><h2>Stop when pixels are trustworthy</h2></div>
-          <p class="section-intro">This checkpoint is complete when graphical output is a dependable kernel facility—not when it resembles a desktop.</p>
+          <p class="section-intro">This checkpoint is complete: graphical output is a dependable kernel facility without pretending to be a desktop.</p>
           <div class="definition">
-            <ul class="checklist">
+            <ul class="checklist complete">
               <li>The same scene renderer runs unmodified on QEMU and Pi 4.</li>
               <li>QEMU uses virtio-gpu 2D through virtio-mmio and validates every response.</li>
               <li>Pi 4 acquires and validates a 32-bit HDMI framebuffer through the mailbox.</li>
@@ -443,7 +444,7 @@ nix develop --command zig build test</code></pre></div>
       </aside>
     </div>
 
-    <footer>thekorn-os first graphics proposal · a focused alternative to beginning the broader <a href="v1-plan.html">v1 interactive-system plan</a> · self-contained HTML with no external assets</footer>
+    <footer>thekorn-os first graphics checkpoint · complete on QEMU and Raspberry Pi 4 · next steps live in the broader <a href="v1-plan.html">v1 interactive-system plan</a></footer>
   </div>
 
   <script>

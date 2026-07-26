@@ -19,6 +19,7 @@ pub const gpu = @import("virtio_gpu.zig");
 
 // QEMU VIRT_UART0: guest physical address 0x0900_0000, region size 0x1000.
 const base = 0x0900_0000;
+pub const user_uart_probe_address = base;
 pub const mmio_regions = [_]struct { start: u64, end: u64 }{
     .{ .start = 0x0800_0000, .end = 0x0802_0000 },
     .{ .start = base, .end = base + 0x1000 },

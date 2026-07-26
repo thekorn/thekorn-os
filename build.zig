@@ -11,6 +11,8 @@ pub fn build(b: *std.Build) void {
     const rpi_firmware = b.dependency("raspberrypi_firmware", .{});
     const kernel_target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
+        // Pre-MMU memory is Device-nGnRnE and rejects unaligned accesses.
+        .cpu_features_add = std.Target.aarch64.featureSet(&.{.strict_align}),
         .cpu_features_sub = std.Target.aarch64.featureSet(&.{ .fp_armv8, .neon }),
         .os_tag = .freestanding,
         .abi = .none,
