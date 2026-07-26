@@ -3,13 +3,15 @@
 //! BCM2711 maps peripherals at `0xfe00_0000`. The boot configuration fixes
 //! UART0's input clock at 48 MHz, so divisors 26 + 3/64 select 115200 baud.
 
-pub const supports_timer_interrupts = false;
+pub const supports_timer_interrupts = true;
 pub const supports_block_device = false;
+pub const gic = @import("gic.zig");
 
 const gpio_base = 0xfe20_0000;
 const uart_base = 0xfe20_1000;
 pub const mmio_regions = [_]struct { start: u64, end: u64 }{
     .{ .start = gpio_base, .end = uart_base + 0x1000 },
+    .{ .start = gic.distributor_base, .end = gic.cpu_interface_base + 0x1000 },
 };
 
 const gpio_function_select_1 = gpio_base + 0x04;

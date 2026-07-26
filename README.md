@@ -189,3 +189,6 @@ and Zig source locations.
 - Phase 9: complete on QEMU — deterministic initramfs and FAT16 images, a
   polling modern virtio-mmio block driver, a read-only block-device contract,
   and host-tested FAT16/32 parsing feed the isolated two-process smoke gate
+- Phase 10: in progress — the Pi 4 BSP configures the BCM2711 GIC-400 and Arm
+  generic physical timer for the existing preemptive two-process initramfs
+  demo; physical-board validation and SD/eMMC storage remain
