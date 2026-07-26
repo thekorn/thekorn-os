@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+nix_profile="$HOME/.nix-profile"
+
+echo "==> Ensuring Nix installation prerequisites are available"
+missing_packages=()
+command -v curl >/dev/null 2>&1 || missing_packages+=(curl)
+command -v xz >/dev/null 2>&1 || missing_packages+=(xz-utils)
+test -r /etc/ssl/certs/ca-certificates.crt || missing_packages+=(ca-certificates)
+if ((${#missing_packages[@]})); then
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"
+fi
+
+# Zig's resolver rejects an otherwise valid resolv.conf without a final newline.
+if [[ -s /etc/resolv.conf ]] &&
+  [[ "$(tail -c 1 /etc/resolv.conf | od -An -t x1 | tr -d ' ')" != "0a" ]]; then
+  echo "==> Repairing /etc/resolv.conf newline"
+  printf '\n' | sudo tee -a /etc/resolv.conf >/dev/null
+fi
+
+if [[ ! -x "$nix_profile/bin/nix" ]]; then
+  echo "==> Installing Nix"
+  curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install \
+    | sh -s -- --no-daemon --yes
+fi
+
+# The installer cannot update the environment of this running script.
+# shellcheck disable=SC1091
+source "$nix_profile/etc/profile.d/nix.sh"
+
+echo "==> Enabling the nix-command and flakes features"
+mkdir -p "$HOME/.config/nix"
+nix_config="$HOME/.config/nix/nix.conf"
+touch "$nix_config"
+if ! grep -Eq '^[[:space:]]*experimental-features[[:space:]]*=.*(^|[[:space:]])flakes([[:space:]]|$)' "$nix_config"; then
+  printf '%s\n' 'experimental-features = nix-command flakes' >> "$nix_config"
+fi
+
+profile_marker="# thekorn-os Nix development shell"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  echo "==> Configuring the repository development environment for login shells"
+  cat >> "$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ -z "\${IN_NIX_SHELL:-}" && "\${PWD}" == "$repo_root" ]]; then
+  if [[ -f "$nix_profile/etc/profile.d/nix.sh" ]]; then
+    source "$nix_profile/etc/profile.d/nix.sh"
+  fi
+  eval "\$("$nix_profile/bin/nix" print-dev-env "$repo_root")"
+fi
+EOF
+fi
+
+echo "==> Realizing the locked development shell"
+nix develop "$repo_root" --command zig build --fetch
+
+echo "==> Orb setup complete"

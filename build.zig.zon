@@ -5,7 +5,7 @@
     .minimum_zig_version = "0.17.0-dev.1415+64dfaa568",
     .dependencies = .{
         .zlinter = .{
-            .url = "git+https://github.com/KurtWagner/zlinter#master",
+            .url = "git+https://github.com/KurtWagner/zlinter#b716e412619129c0a418b52f8ff2c524deb7120d",
             .hash = "zlinter-0.0.1-OjQ08YUfFQDT9Xr6G-G1C0CASyYSAsTj3E4eeRs7LPAf",
         },
         .raspberrypi_firmware = .{
