@@ -34,6 +34,12 @@ jobs:
             zig-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon') }}-
             zig-${{ runner.os }}-
 
+      - name: Cache Zig packages
+        uses: actions/cache@v6
+        with:
+          path: zig-pkg
+          key: zig-pkg-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon') }}
+
       - name: Check spelling
         run: nix develop --command codebook-lsp lint --unique -s .
 
