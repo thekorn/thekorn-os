@@ -158,6 +158,7 @@ fn runScheduler() noreturn {
     @atomicStore(u8, &scheduling_phase, cooperative_phase, .release);
     kernel_scheduler.init(
         highMappedAddress(@intFromPtr(&schedulerTask)),
+        highMappedAddress(@intFromPtr(&idleTask)),
         scheduler_initial_spsr,
     );
     uart.gic.init();
@@ -201,6 +202,10 @@ fn schedulerTask(task_id: usize) callconv(.c) noreturn {
             schedulerFailed();
         }
     }
+}
+
+fn idleTask(_: usize) callconv(.c) noreturn {
+    while (true) asm volatile ("wfi");
 }
 
 fn schedulerYield() void {

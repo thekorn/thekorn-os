@@ -253,6 +253,10 @@ mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
   platform, physical-memory, and high-half MMU initialization; `smoke-v0`
   preserves the complete baseline marker contract and `smoke-v1` requires the
   placeholder `V1:INIT` path
+- V1.1: active — scheduler slots have explicit lifecycle states, fixed wait
+  queues provide IRQ-masked wait/wake/cancel transitions, monotonic deadlines
+  use wrap-safe comparisons, and an idle task executes `wfi` when every normal
+  task is blocked
 
 - Phase 0: complete — freestanding build, linker layout, boot assembly, ELF,
   raw image, QEMU run/debug steps
