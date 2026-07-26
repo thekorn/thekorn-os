@@ -392,11 +392,13 @@ fn initializeMmu() noreturn {
     const data_start: u64 = @intFromPtr(&__data_start);
     const kernel_end: u64 = @intFromPtr(&__kernel_end);
 
-    loadProcessesFromInitramfs();
-    if (uart.supports_block_device) loadProcessesFromFat();
-    for (&processes) |*item| {
-        for (uart.mmio_regions) |region| {
-            item.address_space.map(region.start, region.end, .device_read_write) catch mmuFailed();
+    if (comptime build_options.v0_profile) {
+        loadProcessesFromInitramfs();
+        if (uart.supports_block_device) loadProcessesFromFat();
+        for (&processes) |*item| {
+            for (uart.mmio_regions) |region| {
+                item.address_space.map(region.start, region.end, .device_read_write) catch mmuFailed();
+            }
         }
     }
 
@@ -516,6 +518,10 @@ fn kernelHighMain() callconv(.c) noreturn {
     if (identity_map.descriptor(physical_start) != null) mmuFailed();
     for (uart.mmio_regions) |region| {
         if (identity_map.descriptor(region.start) == null) mmuFailed();
+    }
+    if (!build_options.v0_profile) {
+        KernelConsole.write("V1:INIT\n");
+        halt();
     }
     if (identity_map.descriptor(process.image_address) != null or
         processes[0].entry != process.image_address or

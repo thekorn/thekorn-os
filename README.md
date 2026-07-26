@@ -13,9 +13,8 @@ install a complete AArch64 exception vector table, initialize their platform's
 PL011 UART, and report boot and exception facts over serial. Both platform
 implementations configure a GICv2-compatible interrupt controller and the Arm
 generic physical timer; the complete Pi path is verified on physical hardware.
-See the [v0 implementation plan](docs/plan.html) for the current roadmap and
-phase status, and the [proposed v1 plan](docs/v1-plan.html) for the post-v0
-interactive-system roadmap.
+See the [v0 implementation plan](docs/plan.html) for the completed baseline and
+the [v1 plan](docs/v1-plan.html) for the active interactive-system roadmap.
 Both targets consume the firmware-provided device tree to discover RAM and
 reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
 The complete image is verified on a physical Pi 4 through the deliberate
@@ -115,6 +114,15 @@ Run the kernel interactively on QEMU `virt`:
 nix develop --command zig build run-virt
 ```
 
+The normal build now selects the v1 boot profile. It shares platform, memory,
+and MMU initialization with v0, emits `V1:INIT`, and idles while the init path
+is developed. The frozen v0 self-test remains available as a regression gate:
+
+```sh
+nix develop --command zig build smoke-v0
+nix develop --command zig build smoke-v1
+```
+
 To show the serial output in the QEMU graphical virtual console instead, run:
 
 ```sh
@@ -128,6 +136,8 @@ Run the timeout-bounded serial smoke test:
 ```sh
 nix develop --command zig build smoke-virt
 ```
+
+`smoke-virt` is retained as an alias for `smoke-v0`.
 
 Check the Pi image, DTB handoff, UART, memory discovery, and EMMC2 error path
 on the QEMU `raspi4b` machine:
@@ -238,6 +248,11 @@ reported as `GRAPHICS:FAILED`. Physical Pi serial and HDMI evidence verify the
 mailbox framebuffer, visible scene, and unchanged full boot through `BOOT:OK`.
 
 ## Project status
+
+- V1.0: active — the frozen v0 self-test and the normal v1 init profile share
+  platform, physical-memory, and high-half MMU initialization; `smoke-v0`
+  preserves the complete baseline marker contract and `smoke-v1` requires the
+  placeholder `V1:INIT` path
 
 - Phase 0: complete — freestanding build, linker layout, boot assembly, ELF,
   raw image, QEMU run/debug steps

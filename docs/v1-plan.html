@@ -420,7 +420,7 @@
             <article class="card"><h3>Separate tests from policy</h3><p>Keep deliberate faults and progress counters in the v0 smoke profile. The production profile should boot <code>init</code>, not run kernel self-tests forever.</p></article>
             <article class="card"><h3>Keep hardware honest</h3><p>Do not start v1 board features until the complete v0 storage and two-process gates pass on the physical Pi.</p></article>
           </div>
-          <p class="callout" style="margin-top:15px"><strong>Planning assumption:</strong> v0 Phase 9 storage passes on QEMU, but its polling virtio path and load-by-slice interfaces remain demo contracts. Phase 10 implements Pi SD parity, GIC/timer preemption, and the same isolated-process path; their physical timing and hardware behavior remain unverified. Revisit V1.0, V1.3, and V1.4 estimates after the v0 hardware gate rather than treating the QEMU interfaces as final.</p>
+          <p class="callout" style="margin-top:15px"><strong>Verified baseline:</strong> v0 storage, GIC/timer preemption, and the isolated two-process path pass on QEMU and physical Pi 4. Their polling block and load-by-slice interfaces remain frozen demo contracts rather than final v1 interfaces. V1.0 is active: the exact self-test sequence is retained as <code>smoke-v0</code>, while the normal profile enters the placeholder v1 init path.</p>
         </section>
 
         <section id="architecture">

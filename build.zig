@@ -45,9 +45,23 @@ pub fn build(b: *std.Build) void {
         b.path("src/platform/qemu_virt/uart.zig"),
         false,
         false,
+        false,
     );
     kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
     kernel.root_module.addImport("embedded_users", embedded_users);
+
+    const v0_kernel = addKernel(
+        b,
+        "thekorn_os_v0",
+        kernel_target,
+        optimize,
+        b.path("src/platform/qemu_virt/uart.zig"),
+        false,
+        false,
+        true,
+    );
+    v0_kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
+    v0_kernel.root_module.addImport("embedded_users", embedded_users);
 
     const graphics_kernel = addKernel(
         b,
@@ -57,6 +71,7 @@ pub fn build(b: *std.Build) void {
         b.path("src/platform/qemu_virt/uart.zig"),
         true,
         false,
+        true,
     );
     graphics_kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
     graphics_kernel.root_module.addImport("embedded_users", embedded_users);
@@ -69,9 +84,23 @@ pub fn build(b: *std.Build) void {
         b.path("src/platform/rpi4/uart.zig"),
         true,
         true,
+        false,
     );
     rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
     rpi_kernel.root_module.addImport("embedded_users", embedded_users);
+
+    const v0_rpi_kernel = addKernel(
+        b,
+        "thekorn_os_v0_rpi4",
+        kernel_target,
+        optimize,
+        b.path("src/platform/rpi4/uart.zig"),
+        true,
+        true,
+        true,
+    );
+    v0_rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
+    v0_rpi_kernel.root_module.addImport("embedded_users", embedded_users);
 
     const install_elf = b.addInstallArtifact(kernel, .{});
     const image = rpi_kernel.addObjCopy(.{
@@ -103,6 +132,7 @@ pub fn build(b: *std.Build) void {
     const qemu_image = kernel.addObjCopy(.{ .format = .binary });
     addQemuStep(b, "run-virt", "Run the kernel on QEMU virt", qemu_image.getOutput(), user_disk, false, false);
     addQemuStep(b, "run-virt-gui", "Run the kernel with serial output in the QEMU GUI", qemu_image.getOutput(), user_disk, false, true);
+    const v0_qemu_image = v0_kernel.addObjCopy(.{ .format = .binary });
     const graphics_image = graphics_kernel.addObjCopy(.{ .format = .binary });
     addGraphicsQemuStep(b, graphics_image.getOutput(), user_disk);
     const graphics_smoke = b.addSystemCommand(&.{"bash"});
@@ -117,14 +147,26 @@ pub fn build(b: *std.Build) void {
 
     const smoke = b.addSystemCommand(&.{"bash"});
     smoke.addFileArg(b.path("scripts/smoke-virt.sh"));
-    smoke.addFileArg(qemu_image.getOutput());
+    smoke.addFileArg(v0_qemu_image.getOutput());
     smoke.addFileArg(user_disk);
-    const smoke_step = b.step("smoke-virt", "Boot QEMU and verify the serial marker");
+    const smoke_step = b.step("smoke-v0", "Boot the frozen v0 QEMU regression profile");
     smoke_step.dependOn(&smoke.step);
+    const legacy_smoke_step = b.step("smoke-virt", "Alias for the frozen v0 QEMU regression profile");
+    legacy_smoke_step.dependOn(smoke_step);
 
+    const v1_smoke = b.addSystemCommand(&.{"bash"});
+    v1_smoke.addFileArg(b.path("scripts/smoke-v1.sh"));
+    v1_smoke.addFileArg(qemu_image.getOutput());
+    const v1_smoke_step = b.step("smoke-v1", "Boot QEMU and verify the v1 init profile");
+    v1_smoke_step.dependOn(&v1_smoke.step);
+
+    const v0_rpi_image = v0_rpi_kernel.addObjCopy(.{
+        .basename = "kernel8-v0.img",
+        .format = .binary,
+    });
     const rpi_smoke = b.addSystemCommand(&.{"bash"});
     rpi_smoke.addFileArg(b.path("scripts/smoke-raspi4b.sh"));
-    rpi_smoke.addFileArg(image.getOutput());
+    rpi_smoke.addFileArg(v0_rpi_image.getOutput());
     rpi_smoke.addFileArg(rpi_disk_output);
     const rpi_smoke_step = b.step(
         "smoke-raspi4b",
@@ -149,6 +191,7 @@ pub fn build(b: *std.Build) void {
     const test_options = b.addOptions();
     test_options.addOption(bool, "graphics_enabled", false);
     test_options.addOption(bool, "graphics_rpi4", false);
+    test_options.addOption(bool, "v0_profile", false);
     native_test_module.addOptions("build_options", test_options);
     const native_tests = b.addTest(.{
         .root_module = native_test_module,
@@ -302,10 +345,12 @@ fn addKernel(
     platform: std.Build.LazyPath,
     graphics_enabled: bool,
     graphics_rpi4: bool,
+    v0_profile: bool,
 ) *std.Build.Step.Compile {
     const options = b.addOptions();
     options.addOption(bool, "graphics_enabled", graphics_enabled);
     options.addOption(bool, "graphics_rpi4", graphics_rpi4);
+    options.addOption(bool, "v0_profile", v0_profile);
     const kernel = b.addExecutable(.{
         .name = name,
         .root_module = b.createModule(.{
