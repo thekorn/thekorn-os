@@ -5,8 +5,11 @@ const cpu_interface_base = 0x0801_0000;
 
 const distributor_control = distributor_base + 0x000;
 const interrupt_set_enable = distributor_base + 0x100;
+const interrupt_clear_enable = distributor_base + 0x180;
 const interrupt_clear_pending = distributor_base + 0x280;
 const interrupt_priority = distributor_base + 0x400;
+const interrupt_target = distributor_base + 0x800;
+const interrupt_configuration = distributor_base + 0xc00;
 
 const cpu_control = cpu_interface_base + 0x000;
 const priority_mask = cpu_interface_base + 0x004;
@@ -18,15 +21,37 @@ pub const first_special_interrupt = 1020;
 
 pub fn init() void {
     write32(distributor_control, 0);
-    write8(interrupt_priority + physical_timer_interrupt, 0x80);
-    write32(interrupt_clear_pending, @as(u32, 1) << physical_timer_interrupt);
-    write32(interrupt_set_enable, @as(u32, 1) << physical_timer_interrupt);
+    configure(physical_timer_interrupt);
     write32(distributor_control, 1);
 
     write32(priority_mask, 0xff);
     write32(cpu_control, 1);
     asm volatile ("dsb sy" ::: .{ .memory = true });
     asm volatile ("isb");
+}
+
+pub fn enable(interrupt_id: u32) void {
+    const bank = interrupt_id / 32;
+    const bit = @as(u32, 1) << @intCast(interrupt_id % 32);
+    write32(interrupt_clear_enable + 4 * bank, bit);
+    asm volatile ("dsb sy" ::: .{ .memory = true });
+    const configuration_address = interrupt_configuration + 4 * (interrupt_id / 16);
+    const edge_bit = @as(u32, 1) << @intCast((interrupt_id % 16) * 2 + 1);
+    write32(configuration_address, read32(configuration_address) & ~edge_bit);
+    write8(interrupt_priority + interrupt_id, 0x80);
+    write8(interrupt_target + interrupt_id, 1);
+    write32(interrupt_clear_pending + 4 * bank, bit);
+    write32(interrupt_set_enable + 4 * bank, bit);
+    asm volatile ("dsb sy" ::: .{ .memory = true });
+}
+
+fn configure(interrupt_id: u32) void {
+    const bank = interrupt_id / 32;
+    const bit = @as(u32, 1) << @intCast(interrupt_id % 32);
+    write8(interrupt_priority + interrupt_id, 0x80);
+    if (interrupt_id >= 32) write8(interrupt_target + interrupt_id, 1);
+    write32(interrupt_clear_pending + 4 * bank, bit);
+    write32(interrupt_set_enable + 4 * bank, bit);
 }
 
 pub fn acknowledge() u32 {

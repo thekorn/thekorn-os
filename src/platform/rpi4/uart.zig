@@ -5,6 +5,7 @@
 
 pub const supports_timer_interrupts = true;
 pub const supports_block_device = true;
+pub const interrupt_id = 153;
 pub const gic = @import("gic.zig");
 pub const block = @import("emmc.zig");
 pub const gpu = @import("framebuffer.zig");
@@ -32,6 +33,11 @@ const interrupt_mask = uart_base + 0x38;
 const interrupt_clear = uart_base + 0x44;
 const dma_control = uart_base + 0x48;
 
+pub const ReceivedByte = struct {
+    byte: u8,
+    errors: u4,
+};
+
 pub fn init() void {
     write(control, 0);
     while (read(flags) & (1 << 3) != 0) {}
@@ -58,6 +64,17 @@ pub fn init() void {
 pub fn writeByte(byte: u8) void {
     while (read(flags) & (1 << 5) != 0) {}
     write(data, byte);
+}
+
+pub fn enableRxInterrupt() void {
+    gic.enable(interrupt_id);
+    write(interrupt_mask, (1 << 4) | (1 << 6));
+}
+
+pub fn readByte() ?ReceivedByte {
+    if (read(flags) & (1 << 4) != 0) return null;
+    const value = read(data);
+    return .{ .byte = @truncate(value), .errors = @truncate(value >> 8) };
 }
 
 fn read(address: usize) u32 {

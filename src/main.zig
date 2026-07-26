@@ -17,6 +17,7 @@ const physical_memory = @import("kernel/physical_memory.zig");
 const process = @import("kernel/process.zig");
 const scheduler = @import("kernel/scheduler.zig");
 const syscall = @import("kernel/syscall.zig");
+const terminal = @import("kernel/terminal.zig");
 const Console = @import("kernel/console.zig").Console;
 const KernelConsole = Console(uart.writeByte);
 
@@ -45,6 +46,7 @@ const user_image_names = [process.count][]const u8{ "USER1.ELF", "USER2.ELF" };
 comptime {
     _ = boot_scene;
     _ = framebuffer;
+    _ = terminal;
 }
 
 const MmuProbe = enum {

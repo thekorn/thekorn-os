@@ -13,6 +13,7 @@
 
 pub const supports_timer_interrupts = true;
 pub const supports_block_device = true;
+pub const interrupt_id = 33;
 pub const gic = @import("gic.zig");
 pub const block = @import("virtio_block.zig");
 pub const gpu = @import("virtio_gpu.zig");
@@ -37,12 +38,19 @@ const fractional_baud_rate = base + 0x28;
 const line_control = base + 0x2c;
 // UARTCR: enables the UART and its transmit/receive paths.
 const control = base + 0x30;
+const interrupt_mask = base + 0x38;
 // UARTICR: writing one to a bit clears the corresponding interrupt.
 const interrupt_clear = base + 0x44;
+
+pub const ReceivedByte = struct {
+    byte: u8,
+    errors: u4,
+};
 
 pub fn init() void {
     // Disable the UART while changing its configuration.
     write(control, 0);
+    write(interrupt_mask, 0);
     // Clear all eleven PL011 interrupt sources.
     write(interrupt_clear, 0x7ff);
     // QEMU supplies a 24 MHz UART clock. Divisors 13 + 1/64 select a baud
@@ -60,6 +68,17 @@ pub fn init() void {
 pub fn writeByte(byte: u8) void {
     _ = read(flags);
     write(data, byte);
+}
+
+pub fn enableRxInterrupt() void {
+    gic.enable(interrupt_id);
+    write(interrupt_mask, (1 << 4) | (1 << 6));
+}
+
+pub fn readByte() ?ReceivedByte {
+    if (read(flags) & (1 << 4) != 0) return null;
+    const value = read(data);
+    return .{ .byte = @truncate(value), .errors = @truncate(value >> 8) };
 }
 
 fn read(address: usize) u32 {
