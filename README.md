@@ -219,3 +219,9 @@ and Zig source locations.
   generic physical timer, reads its FAT16 user partition through a polling
   EMMC2 driver, and feeds the existing preemptive two-process demo; complete
   physical-board validation remains
+
+The next milestone is intentionally open for selection. In addition to the
+[proposed v1 interactive-system plan](docs/v1-plan.html), see the focused
+[first graphical output plan](docs/graphics-plan.html) for a smaller path that
+adds a shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4
+HDMI framebuffer parity while keeping serial diagnostics authoritative.

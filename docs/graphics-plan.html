@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A staged implementation plan for first graphical output in thekorn-os on QEMU virt and Raspberry Pi 4.">
+  <title>thekorn-os — first graphics plan</title>
+  <script>
+    (() => {
+      const saved = localStorage.getItem("graphics-plan-theme");
+      const dark = saved
+        ? saved === "dark"
+        : window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.classList.toggle("dark", dark);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f2e9;
+      --surface: #fffdf8;
+      --raised: #ffffff;
+      --muted-surface: #eae5d8;
+      --text: #171b19;
+      --secondary: #48504c;
+      --muted: #747a75;
+      --border: #cbc5b7;
+      --green: #216457;
+      --green-soft: #dcebe5;
+      --coral: #c25f48;
+      --coral-soft: #f4ddd6;
+      --blue: #3c718e;
+      --blue-soft: #dceaf1;
+      --amber: #8e651f;
+      --amber-soft: #f2e4c4;
+      --code-bg: #151b18;
+      --code-text: #e8eee9;
+      --shadow: 0 18px 48px rgb(42 47 43 / 9%);
+      --serif: ui-serif, Georgia, "Times New Roman", serif;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    }
+
+    html.dark {
+      color-scheme: dark;
+      --bg: #111714;
+      --surface: #1a211d;
+      --raised: #202924;
+      --muted-surface: #29322d;
+      --text: #edf2ee;
+      --secondary: #cbd4ce;
+      --muted: #9ca7a0;
+      --border: #414b45;
+      --green: #82c8b5;
+      --green-soft: #203e36;
+      --coral: #ec977f;
+      --coral-soft: #4a2d27;
+      --blue: #91bdd5;
+      --blue-soft: #263d49;
+      --amber: #dfbd77;
+      --amber-soft: #463a21;
+      --code-bg: #0c110f;
+      --code-text: #e8eee9;
+      --shadow: 0 18px 48px rgb(0 0 0 / 22%);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      padding: 34px 30px 100px;
+      background:
+        radial-gradient(circle at 92% 0%, var(--green-soft), transparent 29rem),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.64 var(--sans);
+    }
+    a { color: var(--coral); text-underline-offset: 3px; }
+    a:hover { text-decoration-thickness: 2px; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
+    code { font-family: var(--mono); }
+    :not(pre) > code { padding: 2px 5px; border-radius: 5px; background: var(--muted-surface); font-size: .9em; }
+    .page { max-width: 1200px; margin: 0 auto; }
+    .utility { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 38px; }
+    .back-link { color: var(--secondary); font-size: 13px; text-decoration: none; }
+    .theme-toggle {
+      min-width: 44px;
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font: 650 12px var(--sans);
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(290px, .65fr);
+      gap: 38px;
+      align-items: center;
+      padding: 42px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow, .label, .badge, .phase, th, .toc strong, .status {
+      font: 700 11px var(--mono);
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+    .eyebrow { margin: 0 0 12px; color: var(--coral); }
+    h1, h2 { font-family: var(--serif); font-weight: 500; letter-spacing: -.02em; }
+    h1 { max-width: 720px; margin: 0 0 18px; font-size: clamp(40px, 6.4vw, 68px); line-height: .98; }
+    h2 { margin: 0; font-size: clamp(28px, 4vw, 38px); line-height: 1.1; }
+    h3 { margin: 0 0 8px; font-size: 17px; line-height: 1.35; }
+    p { margin-top: 0; }
+    .lede { max-width: 730px; margin-bottom: 20px; color: var(--secondary); font-size: 18px; }
+    .metadata { display: flex; flex-wrap: wrap; gap: 7px 18px; color: var(--muted); font: 11px var(--mono); text-transform: uppercase; }
+    .screen {
+      padding: 13px;
+      border-radius: 15px;
+      background: #141816;
+      box-shadow: inset 0 0 0 1px #414842, 0 15px 30px rgb(0 0 0 / 18%);
+    }
+    .pixels {
+      position: relative;
+      aspect-ratio: 4 / 3;
+      overflow: hidden;
+      border-radius: 7px;
+      background: #142b35;
+      image-rendering: pixelated;
+    }
+    .pixels::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(135deg, transparent 0 52%, #e06f4f 52% 69%, transparent 69%),
+        linear-gradient(45deg, #73bda8 0 31%, transparent 31%),
+        linear-gradient(#142b35 0 67%, #e8dfc8 67% 70%, #142b35 70%);
+    }
+    .pixels::after {
+      content: "THEKORN OS";
+      position: absolute;
+      left: 9%;
+      top: 12%;
+      color: #f2ead8;
+      font: 700 clamp(11px, 1.6vw, 17px) var(--mono);
+      letter-spacing: .12em;
+    }
+    .screen-label { display: flex; justify-content: space-between; margin-top: 10px; color: #aab3ad; font: 10px var(--mono); text-transform: uppercase; }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 22px 0 48px; }
+    .summary-card { min-height: 122px; padding: 18px; border: 1.5px solid var(--border); border-radius: 13px; background: var(--surface); }
+    .summary-card .label { color: var(--muted); }
+    .summary-card strong { display: block; margin: 7px 0 3px; font: 500 24px/1.15 var(--serif); }
+    .summary-card span:last-child { color: var(--muted); font-size: 13px; }
+    .mobile-nav { display: none; gap: 7px; margin: -22px 0 34px; overflow-x: auto; }
+    .mobile-nav a { flex: 0 0 auto; padding: 6px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--secondary); font-size: 12px; text-decoration: none; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 54px; align-items: start; }
+    main { min-width: 0; }
+    section { margin-bottom: 72px; scroll-margin-top: 24px; }
+    .section-head { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 13px; align-items: start; }
+    .section-number { display: grid; place-items: center; width: 40px; height: 32px; border-radius: 9px; background: var(--green-soft); color: var(--green); font: 700 11px var(--mono); }
+    .section-intro { max-width: 760px; margin: 12px 0 27px 55px; color: var(--muted); }
+    .toc { position: sticky; top: 24px; padding-left: 17px; border-left: 1.5px solid var(--border); }
+    .toc strong { display: block; margin-bottom: 9px; color: var(--muted); }
+    .toc a { display: block; padding: 5px 8px; border-radius: 6px; color: var(--muted); font-size: 13px; text-decoration: none; }
+    .toc a:hover { background: var(--green-soft); color: var(--text); }
+    .grid-2, .grid-3 { display: grid; gap: 15px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card, .callout, .diagram, .table-wrap, .definition { border: 1.5px solid var(--border); border-radius: 13px; background: var(--surface); }
+    .card { padding: 20px; }
+    .card p, .card li { color: var(--secondary); }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .card.yes { border-top: 4px solid var(--green); }
+    .card.later { border-top: 4px solid var(--coral); }
+    .card.platform { border-top: 4px solid var(--blue); }
+    .badge { display: inline-block; margin-bottom: 9px; padding: 3px 7px; border-radius: 6px; }
+    .badge.yes { background: var(--green-soft); color: var(--green); }
+    .badge.later { background: var(--coral-soft); color: var(--coral); }
+    .badge.platform { background: var(--blue-soft); color: var(--blue); }
+    .badge.risk { background: var(--amber-soft); color: var(--amber); }
+    ul, ol { padding-left: 21px; }
+    li + li { margin-top: 6px; }
+    .callout { padding: 18px 20px; background: var(--muted-surface); }
+    .callout strong { color: var(--coral); }
+    .callout p:last-child { margin-bottom: 0; }
+    .diagram { padding: 24px; overflow-x: auto; }
+    .flow { min-width: 760px; display: grid; grid-template-columns: repeat(4, minmax(145px, 1fr)); gap: 36px; align-items: stretch; }
+    .node { position: relative; min-height: 116px; padding: 16px; border: 1.5px solid var(--border); border-radius: 10px; background: var(--raised); }
+    .node::after { content: "→"; position: absolute; right: -28px; top: 40%; color: var(--muted); font-size: 20px; }
+    .node:last-child::after { display: none; }
+    .node.accent { border-color: var(--green); background: var(--green-soft); }
+    .node.platform { border-color: var(--blue); background: var(--blue-soft); }
+    .node strong { display: block; margin-bottom: 6px; }
+    .node span { color: var(--muted); font-size: 12.5px; }
+    .caption { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+    .decision { display: grid; grid-template-columns: 125px minmax(0, 1fr); gap: 15px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+    .decision:last-child { border-bottom: 0; }
+    .decision .status { align-self: start; padding: 4px 7px; border-radius: 6px; text-align: center; }
+    .status.choose { color: var(--green); background: var(--green-soft); }
+    .status.defer { color: var(--coral); background: var(--coral-soft); }
+    .decision p { margin: 3px 0 0; color: var(--secondary); }
+    .timeline { position: relative; margin-top: 10px; }
+    .timeline::before { content: ""; position: absolute; top: 18px; bottom: 18px; left: 31px; width: 1.5px; background: var(--border); }
+    .milestone { position: relative; display: grid; grid-template-columns: 63px minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+    .phase { padding-top: 20px; color: var(--muted); text-align: center; }
+    .phase::after { content: ""; position: absolute; top: 24px; left: 26px; width: 10px; height: 10px; border: 2px solid var(--green); border-radius: 50%; background: var(--bg); }
+    .milestone-body { padding: 19px 21px; border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface); }
+    .milestone-body p { margin: 6px 0 10px; color: var(--secondary); }
+    .exit { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--muted-surface); font-size: 13px; }
+    .exit strong { color: var(--green); }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag { padding: 3px 7px; border-radius: 6px; background: var(--muted-surface); color: var(--muted); font: 10.5px var(--mono); text-transform: uppercase; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; min-width: 700px; border-collapse: collapse; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: var(--muted-surface); color: var(--muted); }
+    td { color: var(--secondary); font-size: 13.5px; }
+    td:first-child { color: var(--text); font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    .file-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .file { padding: 18px; border: 1.5px solid var(--border); border-radius: 11px; background: var(--surface); }
+    .file code { color: var(--coral); font-size: 12px; overflow-wrap: anywhere; }
+    .file p { margin: 8px 0 0; color: var(--secondary); font-size: 13.5px; }
+    .command { margin-top: 15px; overflow: hidden; border-radius: 10px; background: var(--code-bg); color: var(--code-text); }
+    .command span { display: block; padding: 8px 13px 0; color: #aab5af; font: 10px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    pre { margin: 0; padding: 10px 13px 14px; overflow-x: auto; font: 12px/1.65 var(--mono); }
+    .definition { padding: 22px; }
+    .checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 24px; margin: 0; padding: 0; list-style: none; }
+    .checklist li { position: relative; padding-left: 24px; }
+    .checklist li::before { content: "□"; position: absolute; left: 0; color: var(--green); font-weight: 900; }
+    footer { padding-top: 20px; border-top: 1.5px solid var(--border); color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { display: none; }
+      .mobile-nav { display: flex; }
+    }
+    @media (max-width: 820px) {
+      body { padding: 24px 18px 72px; }
+      .hero { grid-template-columns: 1fr; padding: 28px; }
+      .screen { max-width: 390px; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-2, .grid-3, .file-grid { grid-template-columns: 1fr; }
+      .section-intro { margin-left: 0; }
+      .checklist { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .theme-text { display: none; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .decision { grid-template-columns: 1fr; gap: 7px; }
+      .decision .status { justify-self: start; }
+      .milestone { grid-template-columns: 16px minmax(0, 1fr); gap: 9px; }
+      .phase { font-size: 0; }
+      .phase::after { left: 3px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      body { padding: 0; background: #fff; color: #111; }
+      .utility, .toc, .mobile-nav { display: none !important; }
+      .layout { display: block; }
+      .hero, .card, .milestone-body, .definition { break-inside: avoid; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="utility">
+      <a class="back-link" href="../README.md">← Project README</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle color theme"><span aria-hidden="true">◐</span> <span class="theme-text">Theme</span></button>
+    </div>
+
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Focused roadmap · post-v0 alternative</p>
+        <h1>Put the first pixels on screen</h1>
+        <p class="lede">A deliberately narrow graphics milestone: render a deterministic kernel-owned image through QEMU, then prove the same drawing code on Raspberry Pi 4. No desktop, terminal, input stack, or userspace graphics API yet.</p>
+        <div class="metadata"><span>Baseline · v0 complete</span><span>Primary target · QEMU virt</span><span>Parity target · Pi 4</span></div>
+      </div>
+      <div class="screen" aria-label="Conceptual preview of the first graphical output">
+        <div class="pixels"></div>
+        <div class="screen-label"><span>800 × 600</span><span>XRGB8888</span></div>
+      </div>
+    </header>
+
+    <div class="summary-grid" aria-label="Plan summary">
+      <article class="summary-card"><span class="label">Release promise</span><strong>A verified image</strong><span>One scene, both targets</span></article>
+      <article class="summary-card"><span class="label">QEMU backend</span><strong>virtio-gpu 2D</strong><span>MMIO transport, polling first</span></article>
+      <article class="summary-card"><span class="label">Pi backend</span><strong>Mailbox framebuffer</strong><span>Firmware property interface</span></article>
+      <article class="summary-card"><span class="label">Keep stable</span><strong>UART diagnostics</strong><span>Serial remains authoritative</span></article>
+    </div>
+
+    <nav class="mobile-nav" aria-label="Plan sections">
+      <a href="#goal">Goal</a><a href="#architecture">Architecture</a><a href="#decisions">Decisions</a><a href="#milestones">Milestones</a><a href="#verification">Verification</a><a href="#files">Files</a><a href="#risks">Risks</a><a href="#done">Done</a>
+    </nav>
+
+    <div class="layout">
+      <main>
+        <section id="goal">
+          <div class="section-head"><span class="section-number">01</span><h2>Define “graphics” as one honest vertical slice</h2></div>
+          <p class="section-intro">The goal is not a graphical operating system. It is proof that the kernel can acquire a display surface, draw into memory safely, and make those pixels visible on both supported platforms.</p>
+          <div class="grid-3">
+            <article class="card yes"><span class="badge yes">In scope</span><h3>Deterministic scene</h3><p>Clear the screen, draw colored rectangles and lines, then render a short label with a tiny fixed bitmap font.</p></article>
+            <article class="card platform"><span class="badge platform">In scope</span><h3>Two display backends</h3><p>QEMU virtio-gpu first; Raspberry Pi firmware mailbox second. Both expose the same framebuffer description.</p></article>
+            <article class="card later"><span class="badge later">Explicitly later</span><h3>No interaction layer</h3><p>No keyboard, mouse, terminal emulator, compositor, windows, acceleration, or user-process access.</p></article>
+          </div>
+          <p class="callout" style="margin-top:15px"><strong>Release invariant:</strong> graphics failure must never hide boot diagnostics. Initialize UART first, report each graphics stage over serial, and continue to a clear <code>GRAPHICS:FAILED</code> outcome when a display is unavailable.</p>
+        </section>
+
+        <section id="architecture">
+          <div class="section-head"><span class="section-number">02</span><h2>Share pixels, isolate hardware protocols</h2></div>
+          <p class="section-intro">The portable boundary is a linear framebuffer plus an explicit present operation. Device discovery, allocation, negotiation, and cache rules stay in platform code.</p>
+          <div class="diagram" role="img" aria-label="Graphics flow from scene through renderer and framebuffer to QEMU or Raspberry Pi display backend">
+            <div class="flow">
+              <div class="node"><strong>Boot scene</strong><span>Fixed colors, geometry, and “THEKORN OS” label</span></div>
+              <div class="node accent"><strong>Software renderer</strong><span>Bounds-checked pixel, fill, line, and glyph primitives</span></div>
+              <div class="node"><strong>Framebuffer</strong><span>Address, width, height, pitch, byte length, XRGB8888</span></div>
+              <div class="node platform"><strong>Display backend</strong><span>virtio-gpu flush or Pi mailbox scanout</span></div>
+            </div>
+            <p class="caption">Portable code owns what pixels mean. Platform code owns how a visible scanout is acquired and when written pixels become visible.</p>
+          </div>
+          <div class="grid-2" style="margin-top:15px">
+            <article class="card"><h3>Kernel contract</h3><p><code>Framebuffer</code> carries a byte slice, dimensions, pitch, and format. Rendering uses pitch rather than assuming tightly packed rows and clips every primitive to the surface.</p></article>
+            <article class="card"><h3>Platform contract</h3><p><code>initDisplay</code> returns a surface or a typed failure. <code>present</code> publishes a dirty rectangle; the Pi implementation may be a cache barrier/no-op while virtio-gpu submits transfer and flush commands.</p></article>
+          </div>
+        </section>
+
+        <section id="decisions">
+          <div class="section-head"><span class="section-number">03</span><h2>Choose the route with the fewest false shortcuts</h2></div>
+          <p class="section-intro">These choices optimize for a useful kernel mechanism, deterministic testing, and eventual board parity—not for the fastest possible colored pixel at any cost.</p>
+          <div class="card">
+            <div class="decision"><span class="status choose">Choose</span><div><h3>virtio-gpu-device on the QEMU MMIO transport</h3><p>It matches the project’s existing virtio-mmio discovery and queue work, is available in the pinned QEMU, and exercises a real paravirtual display protocol. Start in polling mode with one control queue.</p></div></div>
+            <div class="decision"><span class="status defer">Reject for now</span><div><h3>ramfb as the main backend</h3><p>It can produce pixels quickly, but requires a second fw_cfg protocol and offers less reuse with the existing virtio transport. Keep it only as a fallback if virtio-gpu scope proves disproportionate.</p></div></div>
+            <div class="decision"><span class="status choose">Choose</span><div><h3>One fixed format and a preferred 800 × 600 mode</h3><p>Use XRGB8888 internally. Accept a different negotiated Pi pitch or size, but do not introduce generic pixel conversion until a second format is actually required.</p></div></div>
+            <div class="decision"><span class="status choose">Choose</span><div><h3>Kernel-owned, single-buffered rendering</h3><p>Allocate whole pages from the physical-frame allocator and identity-map them for DMA. A second buffer, damage tracking, and user mappings are follow-on work driven by tearing or performance evidence.</p></div></div>
+            <div class="decision"><span class="status defer">Defer</span><div><h3>Graphical console mirroring</h3><p>Do not couple the first display gate to scrolling, control characters, panic reentrancy, or concurrent writes. A framebuffer console should be its own later milestone.</p></div></div>
+          </div>
+        </section>
+
+        <section id="milestones">
+          <div class="section-head"><span class="section-number">04</span><h2>Build in seven reviewable gates</h2></div>
+          <p class="section-intro">Every gate leaves serial boot intact and has a narrow exit condition. Land portable rendering before either hardware backend so most behavior is host-testable.</p>
+          <div class="timeline">
+            <article class="milestone"><div class="phase">G0</div><div class="milestone-body"><span class="badge yes">Contract</span><h3>Freeze the scene and display boundary</h3><p>Specify the exact scene, XRGB8888 channel layout, preferred dimensions, clipping rules, serial markers, and failure policy. Add the virtio-gpu device only to a new graphics QEMU run profile.</p><div class="tags"><span class="tag">No pixel output yet</span><span class="tag">UART unchanged</span></div><div class="exit"><strong>Exit:</strong> contracts and marker sequence are testable without device access.</div></div></article>
+            <article class="milestone"><div class="phase">G1</div><div class="milestone-body"><span class="badge yes">Portable</span><h3>Implement the software framebuffer renderer</h3><p>Add clear, clipped rectangle, line, and fixed 8×8 glyph routines over caller-provided memory. Test padded pitch, edge clipping, zero-sized surfaces, and exact output hashes on the host.</p><div class="tags"><span class="tag">Host tests</span><span class="tag">No allocation</span></div><div class="exit"><strong>Exit:</strong> a deterministic buffer hash proves the complete scene.</div></div></article>
+            <article class="milestone"><div class="phase">G2</div><div class="milestone-body"><span class="badge risk">Foundation</span><h3>Extract a reusable virtio-mmio transport core</h3><p>Reuse the block driver’s negotiation, queue layout, descriptor submission, notification, and completion logic without forcing block and GPU requests through a block-shaped API. Preserve the existing storage smoke gate.</p><div class="tags"><span class="tag">Transport only</span><span class="tag">Block regression</span></div><div class="exit"><strong>Exit:</strong> virtio-block still passes and a synthetic queue test covers descriptor lifecycle.</div></div></article>
+            <article class="milestone"><div class="phase">G3</div><div class="milestone-body"><span class="badge platform">QEMU</span><h3>Bring up virtio-gpu 2D scanout</h3><p>Discover the GPU DTB node, negotiate required features, query display info, create a 2D resource, attach page-backed memory, select scanout 0, then issue transfer-to-host and resource-flush commands.</p><div class="tags"><span class="tag">Polling</span><span class="tag">Control queue</span><span class="tag">Scanout 0</span></div><div class="exit"><strong>Exit:</strong> QEMU displays the scene and serial emits <code>GRAPHICS:QEMU_OK</code>.</div></div></article>
+            <article class="milestone"><div class="phase">G4</div><div class="milestone-body"><span class="badge yes">Automation</span><h3>Verify visible pixels, not only guest memory</h3><p>Add a graphics smoke script that boots with a display backend and QMP socket, waits for the serial marker, captures a QEMU screenshot, and checks dimensions plus a few stable color regions or a normalized image digest.</p><div class="tags"><span class="tag">Timeout bounded</span><span class="tag">Screenshot artifact</span></div><div class="exit"><strong>Exit:</strong> corruption, missing flushes, and wrong channel order fail automatically.</div></div></article>
+            <article class="milestone"><div class="phase">G5</div><div class="milestone-body"><span class="badge platform">Pi 4</span><h3>Acquire a framebuffer through the firmware mailbox</h3><p>Implement property-channel requests for physical and virtual size, 32-bit depth, pixel order, allocation, and pitch. Validate every response and map the returned bus address correctly before handing it to the shared renderer.</p><div class="tags"><span class="tag">Firmware boundary</span><span class="tag">Cache visibility</span><span class="tag">HDMI</span></div><div class="exit"><strong>Exit:</strong> the same scene appears on HDMI and serial emits <code>GRAPHICS:RPI4_OK</code>.</div></div></article>
+            <article class="milestone"><div class="phase">G6</div><div class="milestone-body"><span class="badge yes">Release</span><h3>Harden failures and document the checkpoint</h3><p>Test absent displays, malformed responses, unsupported formats, allocation failure, and arithmetic overflow. Keep the headless v0 smoke tests unchanged; add graphics as an explicit opt-in gate and document monitor/capture workflows.</p><div class="tags"><span class="tag">Graceful fallback</span><span class="tag">README</span><span class="tag">Pi evidence</span></div><div class="exit"><strong>Exit:</strong> graphics is additive, reproducible, and does not regress serial-only boot.</div></div></article>
+          </div>
+        </section>
+
+        <section id="verification">
+          <div class="section-head"><span class="section-number">05</span><h2>Test at three boundaries</h2></div>
+          <p class="section-intro">A framebuffer hash alone cannot prove scanout; a screenshot alone makes rendering bugs hard to localize. Keep each layer independently observable.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Boundary</th><th>What it proves</th><th>Gate</th></tr></thead>
+              <tbody>
+                <tr><td>Host renderer tests</td><td>Pitch arithmetic, clipping, channel layout, glyph bits, overflow rejection, and deterministic scene contents.</td><td><code>zig build test</code></td></tr>
+                <tr><td>QEMU guest markers</td><td>Discovery, feature negotiation, queue completion, response validation, framebuffer allocation, and successful present.</td><td><code>GRAPHICS:INIT</code> → <code>GRAPHICS:QEMU_OK</code></td></tr>
+                <tr><td>QEMU screenshot</td><td>The device actually scanned out the expected pixels after transfer and flush.</td><td>PPM dimensions and stable region colors/digest</td></tr>
+                <tr><td>Existing smoke gate</td><td>Storage, scheduling, processes, MMU, and serial-only boot remain unchanged.</td><td><code>zig build smoke-virt</code></td></tr>
+                <tr><td>Physical Pi evidence</td><td>Mailbox address translation, pitch, cache visibility, and HDMI scanout work on the real board.</td><td>Serial transcript plus captured display photo</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="command"><span>Target commands introduced by their milestones</span><pre><code>nix develop --command zig build run-virt-graphics
+nix develop --command zig build smoke-virt-graphics
+nix develop --command zig build test</code></pre></div>
+        </section>
+
+        <section id="files">
+          <div class="section-head"><span class="section-number">06</span><h2>Keep ownership visible in the file layout</h2></div>
+          <p class="section-intro">Names are provisional, but the boundaries should not be: portable pixels in the kernel, device protocols under their platform, and only genuinely shared virtio mechanics extracted.</p>
+          <div class="file-grid">
+            <article class="file"><code>src/kernel/framebuffer.zig</code><p>Surface description, pixel format, checked offset calculation, and renderer primitives.</p></article>
+            <article class="file"><code>src/kernel/boot_scene.zig</code><p>The deterministic first image and fixed bitmap glyph data.</p></article>
+            <article class="file"><code>src/platform/qemu_virt/virtio.zig</code><p>Shared MMIO transport and split-queue mechanics extracted only when G2 begins.</p></article>
+            <article class="file"><code>src/platform/qemu_virt/virtio_gpu.zig</code><p>GPU commands, responses, resource lifecycle, scanout, transfer, and flush.</p></article>
+            <article class="file"><code>src/platform/rpi4/mailbox.zig</code><p>Mailbox status protocol and aligned property request/response transport.</p></article>
+            <article class="file"><code>src/platform/rpi4/framebuffer.zig</code><p>Framebuffer property tags, bus-address conversion, and presentation visibility.</p></article>
+            <article class="file"><code>scripts/smoke-virt-graphics.sh</code><p>QMP screenshot capture, serial marker checks, timeout handling, and image assertions.</p></article>
+            <article class="file"><code>build.zig</code><p>Opt-in run/smoke profiles that attach <code>virtio-gpu-device</code> without changing headless gates.</p></article>
+          </div>
+        </section>
+
+        <section id="risks">
+          <div class="section-head"><span class="section-number">07</span><h2>Retire the risky assumptions early</h2></div>
+          <p class="section-intro">The hardest parts are device ownership and visibility, not drawing rectangles. Sequence the plan so each uncertainty fails before graphical-console scope can obscure it.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Risk</th><th>Why it matters</th><th>Mitigation</th></tr></thead>
+              <tbody>
+                <tr><td>Virtio extraction regresses block I/O</td><td>Graphics could destabilize the completed storage path.</td><td>Extract only transport mechanics; run the Phase 9 storage gate at G2 and every later gate.</td></tr>
+                <tr><td>DMA memory is not physically suitable</td><td>High-half virtual pointers are not device addresses and queue/backing pages must remain resident.</td><td>Allocate page-aligned physical frames, retain ownership for resource lifetime, and pass explicit physical addresses.</td></tr>
+                <tr><td>Framebuffer writes never become visible</td><td>Guest-memory tests can pass despite a missing virtio flush or Pi cache-maintenance issue.</td><td>Require screenshot/HDMI evidence and make <code>present</code> an explicit backend operation.</td></tr>
+                <tr><td>Pi firmware returns a surprising layout</td><td>Pitch, size, pixel order, and bus address may differ from requests.</td><td>Treat responses as authoritative, validate lengths and arithmetic, and render through returned pitch.</td></tr>
+                <tr><td>Graphics becomes a second console too soon</td><td>Panic paths, scrolling, synchronization, and escape parsing multiply scope.</td><td>Render one immutable boot scene; leave UART as the only console for this checkpoint.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="done">
+          <div class="section-head"><span class="section-number">08</span><h2>Stop when pixels are trustworthy</h2></div>
+          <p class="section-intro">This checkpoint is complete when graphical output is a dependable kernel facility—not when it resembles a desktop.</p>
+          <div class="definition">
+            <ul class="checklist">
+              <li>The same scene renderer runs unmodified on QEMU and Pi 4.</li>
+              <li>QEMU uses virtio-gpu 2D through virtio-mmio and validates every response.</li>
+              <li>Pi 4 acquires and validates a 32-bit HDMI framebuffer through the mailbox.</li>
+              <li>Rows honor returned pitch and all drawing is clipped and overflow-checked.</li>
+              <li>An automated QEMU screenshot gate proves visible output.</li>
+              <li>A physical Pi serial transcript and display capture prove board parity.</li>
+              <li>Display absence produces a serial failure marker rather than a hang.</li>
+              <li>All existing serial, storage, MMU, scheduler, and process gates still pass.</li>
+              <li>No graphics API is exposed to EL0 in this checkpoint.</li>
+              <li>README documents run, verification, and physical-board workflows.</li>
+            </ul>
+          </div>
+          <p class="callout" style="margin-top:15px"><strong>Natural next choice:</strong> after this gate, choose either a framebuffer text console (if observability is the priority) or a read-only userspace framebuffer demo (if process/device boundaries are the learning goal). Do not silently bundle either into first pixels.</p>
+        </section>
+      </main>
+
+      <aside class="toc" aria-label="Table of contents">
+        <strong>On this page</strong>
+        <a href="#goal">01 · Goal</a>
+        <a href="#architecture">02 · Architecture</a>
+        <a href="#decisions">03 · Decisions</a>
+        <a href="#milestones">04 · Milestones</a>
+        <a href="#verification">05 · Verification</a>
+        <a href="#files">06 · File map</a>
+        <a href="#risks">07 · Risks</a>
+        <a href="#done">08 · Definition of done</a>
+      </aside>
+    </div>
+
+    <footer>thekorn-os first graphics proposal · a focused alternative to beginning the broader <a href="v1-plan.html">v1 interactive-system plan</a> · self-contained HTML with no external assets</footer>
+  </div>
+
+  <script>
+    const button = document.querySelector(".theme-toggle");
+    button.addEventListener("click", () => {
+      const dark = !document.documentElement.classList.contains("dark");
+      document.documentElement.classList.toggle("dark", dark);
+      localStorage.setItem("graphics-plan-theme", dark ? "dark" : "light");
+    });
+  </script>
+</body>
+</html>
