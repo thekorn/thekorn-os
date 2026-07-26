@@ -194,9 +194,13 @@ graphics-enabled kernel, attaches a modern MMIO virtio-gpu device, renders the
 
 ```sh
 nix develop --command zig build run-virt-graphics
+nix develop --command zig build smoke-virt-graphics
 ```
 
-The existing headless `run-virt` and `smoke-virt` profiles remain unchanged.
+The smoke gate waits for the serial success marker, captures the scanout through
+QMP, and verifies its dimensions and stable scene colors. The resulting PPM is
+written to `zig-out/virt-graphics.ppm`. The existing headless `run-virt` and
+`smoke-virt` profiles remain unchanged.
 
 ## Project status
 
@@ -246,8 +250,11 @@ The existing headless `run-virt` and `smoke-virt` profiles remain unchanged.
   retains one contiguous page-backed XRGB8888 resource, selects scanout 0, and
   transfers and flushes the shared boot scene; failures remain serial-visible
   and non-fatal
+- Graphics G4: complete — the bounded QMP smoke gate requires a clean full boot,
+  captures the actual QEMU scanout, and verifies 800 × 600 geometry plus stable
+  background, panel, accent, and glyph colors before retaining the PPM
 
-Graphics G4 is the active milestone. The focused
+Graphics G5 is the active milestone. The focused
 [first graphical output plan](docs/graphics-plan.html) tracks the work toward a
 shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
 framebuffer parity while keeping serial diagnostics authoritative. Physical

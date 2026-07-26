@@ -104,8 +104,10 @@ pub fn build(b: *std.Build) void {
     graphics_smoke.addFileArg(b.path("scripts/smoke-virt-graphics.sh"));
     graphics_smoke.addFileArg(graphics_image.getOutput());
     graphics_smoke.addFileArg(user_disk);
+    const graphics_capture = graphics_smoke.addOutputFileArg("virt-graphics.ppm");
+    const install_graphics_capture = b.addInstallFile(graphics_capture, "virt-graphics.ppm");
     const graphics_smoke_step = b.step("smoke-virt-graphics", "Boot virtio-gpu and verify ordered graphics markers");
-    graphics_smoke_step.dependOn(&graphics_smoke.step);
+    graphics_smoke_step.dependOn(&install_graphics_capture.step);
     addQemuStep(b, "debug-virt", "Run QEMU virt paused with a GDB server", qemu_image.getOutput(), user_disk, true, false);
 
     const smoke = b.addSystemCommand(&.{"bash"});
