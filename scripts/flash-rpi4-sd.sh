@@ -29,13 +29,14 @@ case "$(uname -s)" in
       echo "flash-rpi4-sd: target must be a whole disk such as /dev/disk4, not a partition" >&2
       exit 1
     fi
-    if ! grep -Eq '^[[:space:]]*Internal:[[:space:]]+No' <<<"$info" ||
-       ! grep -Eq '^[[:space:]]*Removable Media:[[:space:]]+Removable' <<<"$info"; then
-      echo "flash-rpi4-sd: refusing a disk that is not reported as removable and external: $device" >&2
+    if ! grep -Eq '^[[:space:]]*Removable Media:[[:space:]]+Removable' <<<"$info" ||
+       { ! grep -Eq '^[[:space:]]*(Internal:[[:space:]]+No|Device Location:[[:space:]]+External)' <<<"$info" &&
+         ! grep -Eq '^[[:space:]]*Protocol:[[:space:]]+Secure Digital' <<<"$info"; }; then
+      echo "flash-rpi4-sd: refusing a disk that is not reported as removable external media or an SD card: $device" >&2
       exit 1
     fi
     raw_device=${device/\/dev\/disk/\/dev\/rdisk}
-    echo "$info" | awk -F: '/Device Node|Media Name|Disk Size|Removable Media/ { sub(/^[[:space:]]+/, "", $1); sub(/^[[:space:]]+/, "", $2); print "  " $1 ": " $2 }'
+    echo "$info" | awk -F: '/Device Node|Media Name|Protocol|Disk Size|Device Location|Removable Media/ { sub(/^[[:space:]]+/, "", $1); sub(/^[[:space:]]+/, "", $2); print "  " $1 ": " $2 }'
     ;;
   Linux)
     if [[ ! -b "$device" ]]; then
@@ -74,11 +75,13 @@ sudo -v
 case "$(uname -s)" in
   Darwin)
     diskutil unmountDisk "$device"
-    sudo dd if="$image" of="$raw_device" bs=4m
+    sudo /bin/dd if="$image" of="$raw_device" bs=4m
     sync
-    echo "flash-rpi4-sd: verifying written image..." >&2
-    sudo cmp -n "$image_size" "$image" "$raw_device"
+    # Disk Arbitration mounts freshly written FAT volumes and changes their
+    # metadata, so a byte-for-byte comparison produces false failures.
+    diskutil unmountDisk "$device"
     diskutil eject "$device"
+    result="write completed"
     ;;
   Linux)
     while IFS= read -r node; do
@@ -90,7 +93,8 @@ case "$(uname -s)" in
     echo "flash-rpi4-sd: verifying written image..." >&2
     sudo cmp -n "$image_size" "$image" "$raw_device"
     sync
+    result="write and verification passed"
     ;;
 esac
 
-echo "flash-rpi4-sd: write and verification passed; the card is safe to remove" >&2
+echo "flash-rpi4-sd: $result; the card is safe to remove" >&2

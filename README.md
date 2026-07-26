@@ -77,10 +77,13 @@ Use the whole removable disk as `DEVICE`, not one of its partitions. On macOS,
 find it with `diskutil list` and use a name such as `/dev/disk4`. On Linux, use
 `lsblk -p` and a name such as `/dev/sdb`. Check the device name and size
 carefully: writing the image destroys all existing data on the selected card.
-The script refuses internal, non-removable, and partition devices, displays the
-selected disk, requires an exact interactive confirmation, unmounts it, writes
-the image with `dd`, and verifies the written bytes. It prompts for `sudo` only
-after confirmation. An alternate image can be supplied as the second argument.
+The script refuses internal fixed disks, non-removable media, and partition
+devices, displays the selected disk, requires an exact interactive
+confirmation, unmounts it, writes the image with `dd`, and safely ejects it. On
+Linux it also verifies the written bytes; macOS automatically mounts and
+modifies newly written FAT metadata, so an exact post-write comparison is not
+possible there. It prompts for `sudo` only after confirmation. An alternate
+image can be supplied as the second argument.
 
 Raspberry Pi Imager remains an alternative: select the generated image with
 its **Use custom** action. The build itself never selects or writes a device.
