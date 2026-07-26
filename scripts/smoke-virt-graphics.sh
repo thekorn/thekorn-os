@@ -129,3 +129,36 @@ for point, color in expected.items():
 PY
 
 echo "graphics smoke: verified 800x600 visible pixels in $capture"
+
+fallback_serial="$temporary/fallback-serial.log"
+fallback_log="$temporary/fallback-qemu.log"
+set +e
+timeout --signal=TERM 5s qemu-system-aarch64 \
+  -machine virt -cpu cortex-a72 -smp 1 -m 128M \
+  -display none -monitor none -serial "file:$fallback_serial" \
+  -global virtio-mmio.force-legacy=false -kernel "$kernel" \
+  -drive "file=$disk,format=raw,if=none,readonly=on,id=users" \
+  -device virtio-blk-device,drive=users >"$fallback_log" 2>&1
+fallback_status=$?
+set -e
+
+cat "$fallback_serial"
+cat "$fallback_log" >&2
+if [[ $fallback_status -ne 124 ]]; then
+  echo "graphics smoke: expected fallback timeout status 124, got $fallback_status" >&2
+  exit 1
+fi
+if grep -Eq ':(UNHANDLED|PANIC)' "$fallback_serial"; then
+  echo 'graphics smoke: fatal fallback marker found' >&2
+  exit 1
+fi
+fallback_init=$(grep -n -m1 '^GRAPHICS:INIT' "$fallback_serial" | cut -d: -f1 || true)
+fallback_failed=$(grep -n -m1 '^GRAPHICS:FAILED' "$fallback_serial" | cut -d: -f1 || true)
+fallback_boot=$(grep -n -m1 '^BOOT:OK' "$fallback_serial" | cut -d: -f1 || true)
+if [[ -z "$fallback_init" || -z "$fallback_failed" || -z "$fallback_boot" ||
+      "$fallback_init" -ge "$fallback_failed" || "$fallback_failed" -ge "$fallback_boot" ]] ||
+   grep -q '^GRAPHICS:QEMU_OK' "$fallback_serial"; then
+  echo 'graphics smoke: unavailable display did not fall back cleanly' >&2
+  exit 1
+fi
+echo 'graphics smoke: unavailable display reported GRAPHICS:FAILED and boot continued'

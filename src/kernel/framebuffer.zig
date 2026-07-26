@@ -7,6 +7,7 @@ pub const PixelFormat = enum {
     /// One little-endian u32 per pixel: blue at byte 0, green at byte 1,
     /// red at byte 2, and the unused X byte at byte 3.
     xrgb8888,
+    unsupported,
 };
 
 pub const Framebuffer = struct {
@@ -296,5 +297,12 @@ test "Renderer rejects malformed framebuffer layouts" {
         .height = 2,
         .pitch = 8,
         .format = .xrgb8888,
+    }));
+    try std.testing.expectError(error.UnsupportedFormat, Renderer.init(.{
+        .bytes = &.{},
+        .width = 0,
+        .height = 0,
+        .pitch = 0,
+        .format = .unsupported,
     }));
 }

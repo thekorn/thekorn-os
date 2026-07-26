@@ -59,8 +59,7 @@ pub fn initialize(allocator: anytype, transport_bases: []const u64) Error!Surfac
     var header = Header{ .command_type = command_get_display_info };
     try request(std.mem.asBytes(&header), response_ok_display_info, @sizeOf(DisplayInfo));
     const mode = state.response.displays[0];
-    if (mode.enabled == 0) return error.DisplayUnavailable;
-    if (mode.rectangle.width < width or mode.rectangle.height < height) return error.InvalidDimensions;
+    try validateDisplay(mode);
 
     state.backing_address = allocator.allocateContiguous(backing_frames) orelse return error.AllocationFailed;
     const rectangle = Rectangle{ .width = width, .height = height };
@@ -110,6 +109,13 @@ fn validateCompletion(identifier: u32, length: u32, minimum: u32) error{InvalidC
     }
 }
 
+fn validateDisplay(display: Display) Error!void {
+    if (display.enabled == 0) return error.DisplayUnavailable;
+    if (display.rectangle.width < width or display.rectangle.height < height) {
+        return error.InvalidDimensions;
+    }
+}
+
 pub fn validateResponse(actual: u32, expected: u32) error{InvalidResponse}!void {
     if (actual != expected) return error.InvalidResponse;
 }
@@ -125,4 +131,13 @@ test "GPU completions require the submitted head and full response" {
     try std.testing.expectError(error.InvalidCompletion, validateCompletion(1, @sizeOf(Header), @sizeOf(Header)));
     try std.testing.expectError(error.InvalidCompletion, validateCompletion(0, @sizeOf(Header) - 1, @sizeOf(Header)));
     try std.testing.expectError(error.InvalidCompletion, validateCompletion(0, @sizeOf(DisplayInfo) + 1, @sizeOf(Header)));
+}
+
+test "GPU requires an enabled display large enough for the scene" {
+    try validateDisplay(.{ .rectangle = .{ .width = width, .height = height }, .enabled = 1 });
+    try std.testing.expectError(error.DisplayUnavailable, validateDisplay(.{}));
+    try std.testing.expectError(error.InvalidDimensions, validateDisplay(.{
+        .rectangle = .{ .width = width - 1, .height = height },
+        .enabled = 1,
+    }));
 }

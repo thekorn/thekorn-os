@@ -199,8 +199,9 @@ nix develop --command zig build smoke-virt-graphics
 
 The smoke gate waits for the serial success marker, captures the scanout through
 QMP, and verifies its dimensions and stable scene colors. The resulting PPM is
-written to `zig-out/virt-graphics.ppm`. The existing headless `run-virt` and
-`smoke-virt` profiles remain unchanged.
+written to `zig-out/virt-graphics.ppm`. It then boots the same graphics kernel
+without a GPU and requires `GRAPHICS:FAILED` followed by `BOOT:OK`. The existing
+headless `run-virt` and `smoke-virt` profiles remain unchanged.
 
 The existing Pi 4 kernel also requests an RGB 32-bit framebuffer from the
 firmware property mailbox, renders through the same pitch-aware software
@@ -264,9 +265,13 @@ deferred; this status describes the software implementation only.
   validated firmware results feed the shared renderer, and QEMU `raspi4b`
   reaches `GRAPHICS:RPI4_OK` before its known storage boundary. Physical HDMI
   evidence remains explicitly deferred
+- Graphics G6: software-complete — absent displays fall back without hiding
+  serial boot, malformed protocol data, unsupported formats, allocation limits,
+  and arithmetic bounds are tested, and both headless and visible-pixel QEMU
+  gates remain reproducible. Physical Pi capture is the only deferred gate
 
-Graphics G6 is the active milestone. The focused
+The focused
 [first graphical output plan](docs/graphics-plan.html) tracks the work toward a
 shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
 framebuffer parity while keeping serial diagnostics authoritative. Physical
-hardware verification gates are intentionally deferred.
+hardware verification is intentionally deferred and is not claimed complete.
