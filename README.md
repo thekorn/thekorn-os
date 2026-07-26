@@ -90,6 +90,11 @@ its **Use custom** action. The build itself never selects or writes a device.
 Connect a 3.3 V serial adapter to GPIO 14/15 at 115200 8N1 before powering the
 Pi. See the [Pi 4 hardware guide](docs/rpi4.html) for wiring and recovery steps.
 
+Every push to `main` runs the spell check, linter, host-runnable smoke tests,
+and unit tests on Linux before building the Raspberry Pi 4 image. The
+successful workflow run exposes `thekorn-os-rpi4.img` as a downloadable GitHub
+Actions artifact named with the commit SHA.
+
 An optimization mode can be selected explicitly, for example:
 
 ```sh

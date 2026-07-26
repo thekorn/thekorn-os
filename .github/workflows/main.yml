@@ -1,0 +1,47 @@
+name: Main
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Check spelling
+        run: nix develop --command codebook-lsp lint --unique -s .
+
+      - name: Lint Zig source
+        run: nix develop --command zig build lint
+
+      - name: Run QEMU virt smoke test
+        run: nix develop --command zig build smoke-virt
+
+      - name: Run QEMU Raspberry Pi 4 smoke test
+        run: nix develop --command zig build smoke-raspi4b
+
+      - name: Run QEMU graphics smoke test
+        run: nix develop --command zig build smoke-virt-graphics
+
+      - name: Run unit tests
+        run: nix develop --command zig build test
+
+      - name: Build Raspberry Pi 4 image
+        run: nix develop --command zig build
+
+      - name: Upload Raspberry Pi 4 image
+        uses: actions/upload-artifact@v4
+        with:
+          name: thekorn-os-rpi4-${{ github.sha }}
+          path: zig-out/thekorn-os-rpi4.img
+          if-no-files-found: error
