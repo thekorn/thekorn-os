@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) void {
         optimize,
         b.path("src/platform/qemu_virt/uart.zig"),
         false,
+        false,
     );
     kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
     kernel.root_module.addImport("embedded_users", embedded_users);
@@ -53,6 +54,7 @@ pub fn build(b: *std.Build) void {
         optimize,
         b.path("src/platform/qemu_virt/uart.zig"),
         true,
+        false,
     );
     graphics_kernel.setLinkerScript(b.path("src/platform/qemu_virt/linker.ld"));
     graphics_kernel.root_module.addImport("embedded_users", embedded_users);
@@ -63,7 +65,8 @@ pub fn build(b: *std.Build) void {
         kernel_target,
         optimize,
         b.path("src/platform/rpi4/uart.zig"),
-        false,
+        true,
+        true,
     );
     rpi_kernel.setLinkerScript(b.path("src/arch/aarch64/linker.ld"));
     rpi_kernel.root_module.addImport("embedded_users", embedded_users);
@@ -143,6 +146,7 @@ pub fn build(b: *std.Build) void {
     native_test_module.addImport("embedded_users", embedded_users);
     const test_options = b.addOptions();
     test_options.addOption(bool, "graphics_enabled", false);
+    test_options.addOption(bool, "graphics_rpi4", false);
     native_test_module.addOptions("build_options", test_options);
     const native_tests = b.addTest(.{
         .root_module = native_test_module,
@@ -186,6 +190,15 @@ pub fn build(b: *std.Build) void {
         .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
     });
     test_step.dependOn(&b.addRunArtifact(virtio_gpu_tests).step);
+    const rpi_framebuffer_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/platform/rpi4/framebuffer.zig"),
+            .target = b.graph.host,
+            .optimize = if (coverage) .Debug else optimize,
+        }),
+        .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
+    });
+    test_step.dependOn(&b.addRunArtifact(rpi_framebuffer_tests).step);
     if (coverage) {
         const remove_coverage_dirs = b.addSystemCommand(&.{
             "rm",
@@ -286,9 +299,11 @@ fn addKernel(
     optimize: std.builtin.OptimizeMode,
     platform: std.Build.LazyPath,
     graphics_enabled: bool,
+    graphics_rpi4: bool,
 ) *std.Build.Step.Compile {
     const options = b.addOptions();
     options.addOption(bool, "graphics_enabled", graphics_enabled);
+    options.addOption(bool, "graphics_rpi4", graphics_rpi4);
     const kernel = b.addExecutable(.{
         .name = name,
         .root_module = b.createModule(.{

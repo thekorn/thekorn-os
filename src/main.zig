@@ -369,7 +369,7 @@ fn initializeGraphics() void {
         KernelConsole.write(boot_scene.markers.failed ++ "\n");
         return;
     };
-    const display = framebuffer.Framebuffer{ .bytes = surface.bytes, .width = framebuffer.preferred_width, .height = framebuffer.preferred_height, .pitch = framebuffer.preferred_width * 4, .format = .xrgb8888 };
+    const display = framebuffer.Framebuffer{ .bytes = surface.bytes, .width = surface.width, .height = surface.height, .pitch = surface.pitch, .format = .xrgb8888 };
     const renderer = framebuffer.Renderer.init(display) catch {
         KernelConsole.write(boot_scene.markers.failed ++ "\n");
         return;
@@ -379,7 +379,7 @@ fn initializeGraphics() void {
         KernelConsole.write(boot_scene.markers.failed ++ "\n");
         return;
     };
-    KernelConsole.write(boot_scene.markers.qemu_ok ++ "\n");
+    KernelConsole.write((if (comptime build_options.graphics_rpi4) boot_scene.markers.rpi4_ok else boot_scene.markers.qemu_ok) ++ "\n");
 }
 
 fn initializeMmu() noreturn {

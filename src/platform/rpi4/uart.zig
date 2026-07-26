@@ -7,10 +7,12 @@ pub const supports_timer_interrupts = true;
 pub const supports_block_device = true;
 pub const gic = @import("gic.zig");
 pub const block = @import("emmc.zig");
+pub const gpu = @import("framebuffer.zig");
 
 const gpio_base = 0xfe20_0000;
 const uart_base = 0xfe20_1000;
 pub const mmio_regions = [_]struct { start: u64, end: u64 }{
+    .{ .start = 0xfe00_b000, .end = 0xfe00_c000 },
     .{ .start = gpio_base, .end = uart_base + 0x1000 },
     .{ .start = gic.distributor_base, .end = gic.cpu_interface_base + 0x1000 },
     .{ .start = block.base, .end = block.base + 0x1000 },

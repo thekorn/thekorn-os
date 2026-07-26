@@ -22,7 +22,13 @@ const backing_bytes = width * height * @sizeOf(u32);
 const backing_frames = std.mem.alignForward(usize, backing_bytes, page_size) / page_size;
 
 pub const Error = error{ DisplayUnavailable, InvalidDimensions, AllocationFailed, TransportFailed, InvalidResponse, InvalidCompletion };
-pub const Surface = struct { bytes: []u8, presentFn: *const fn (x: u32, y: u32, rectangle_width: u32, rectangle_height: u32) Error!void };
+pub const Surface = struct {
+    bytes: []u8,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    presentFn: *const fn (x: u32, y: u32, rectangle_width: u32, rectangle_height: u32) Error!void,
+};
 
 const Header = extern struct { command_type: u32 = 0, flags: u32 = 0, fence_id: u64 = 0, context_id: u32 = 0, padding: u32 = 0 };
 const Rectangle = extern struct { x: u32 = 0, y: u32 = 0, width: u32 = 0, height: u32 = 0 };
@@ -66,7 +72,7 @@ pub fn initialize(allocator: anytype, transport_bases: []const u64) Error!Surfac
     try request(std.mem.asBytes(&scanout), response_ok_nodata, @sizeOf(Header));
 
     const bytes: [*]u8 = @ptrFromInt(state.backing_address);
-    return .{ .bytes = bytes[0..backing_bytes], .presentFn = present };
+    return .{ .bytes = bytes[0..backing_bytes], .width = width, .height = height, .pitch = width * 4, .presentFn = present };
 }
 
 fn findDevice(transport_bases: []const u64) virtio.Error!virtio.Device {

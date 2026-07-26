@@ -202,6 +202,12 @@ QMP, and verifies its dimensions and stable scene colors. The resulting PPM is
 written to `zig-out/virt-graphics.ppm`. The existing headless `run-virt` and
 `smoke-virt` profiles remain unchanged.
 
+The existing Pi 4 kernel also requests an RGB 32-bit framebuffer from the
+firmware property mailbox, renders through the same pitch-aware software
+renderer, and reports `GRAPHICS:RPI4_OK` on success. Failure is non-fatal and
+reported as `GRAPHICS:FAILED`. HDMI/physical-board evidence is intentionally
+deferred; this status describes the software implementation only.
+
 ## Project status
 
 - Phase 0: complete — freestanding build, linker layout, boot assembly, ELF,
@@ -253,8 +259,13 @@ written to `zig-out/virt-graphics.ppm`. The existing headless `run-virt` and
 - Graphics G4: complete — the bounded QMP smoke gate requires a clean full boot,
   captures the actual QEMU scanout, and verifies 800 × 600 geometry plus stable
   background, panel, accent, and glyph colors before retaining the PPM
+- Graphics G5: implemented — the Pi 4 property mailbox requests physical and
+  virtual geometry, RGB depth/order, a page-aligned allocation, and pitch;
+  validated firmware results feed the shared renderer, and QEMU `raspi4b`
+  reaches `GRAPHICS:RPI4_OK` before its known storage boundary. Physical HDMI
+  evidence remains explicitly deferred
 
-Graphics G5 is the active milestone. The focused
+Graphics G6 is the active milestone. The focused
 [first graphical output plan](docs/graphics-plan.html) tracks the work toward a
 shared software framebuffer, QEMU virtio-gpu output, and Raspberry Pi 4 HDMI
 framebuffer parity while keeping serial diagnostics authoritative. Physical
