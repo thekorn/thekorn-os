@@ -75,7 +75,14 @@ extern fn mmuProbeWrite(address: usize) callconv(.c) void;
 extern fn floatingPointProbe() callconv(.c) void;
 extern fn mmuEnterHighHalf(continuation: u64, vector_base: u64, stack_top: u64) callconv(.c) noreturn;
 
-pub export fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c) noreturn {
+comptime {
+    if (!builtin.is_test) {
+        @export(&kernelMain, .{ .name = "kernelMain" });
+        @export(&exceptionHandler, .{ .name = "exceptionHandler" });
+    }
+}
+
+fn kernelMain(dtb: usize, entry_el: usize, mpidr: usize) callconv(.c) noreturn {
     uart.init();
     KernelConsole.writeBootFacts(
         dtb,
@@ -491,7 +498,7 @@ fn schedulerFailed() noreturn {
     halt();
 }
 
-pub export fn exceptionHandler(
+fn exceptionHandler(
     vector: usize,
     frame: *exceptions.Frame,
 ) callconv(.c) *exceptions.Frame {
@@ -797,11 +804,15 @@ fn resetTestOutput() void {
 }
 
 test {
+    _ = exceptions;
     _ = elf;
+    _ = fdt;
     _ = mmu;
+    _ = physical_memory;
     _ = process;
     _ = scheduler;
     _ = syscall;
+    _ = timer;
 }
 
 test "panic output uses the serial CRLF convention" {
