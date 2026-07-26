@@ -9,8 +9,10 @@ The current implementation boots a freestanding kernel in writable QEMU
 Raspberry Pi 4 image whose kernel loads at `0x80000`. Both targets enter EL1h,
 install a complete AArch64 exception vector table, initialize their platform's
 PL011 UART, and report boot and exception facts over serial. On QEMU, the
-kernel also handles generic physical timer interrupts through a GICv2. See [the
-implementation plan](docs/plan.html) for the roadmap and current phase status.
+kernel also handles generic physical timer interrupts through a GICv2. See the
+[v0 implementation plan](docs/plan.html) for the current roadmap and phase
+status, and the [proposed v1 plan](docs/v1-plan.html) for the post-v0
+interactive-system roadmap.
 Both targets consume the firmware-provided device tree to discover RAM and
 reserved ranges and initialize a 4 KiB bitmap physical-frame allocator.
 The Phase 2 baseline is verified on a physical Pi 4 through the deliberate
