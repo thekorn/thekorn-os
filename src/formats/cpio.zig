@@ -13,12 +13,30 @@ pub const Error = error{
 pub const Archive = struct {
     bytes: []const u8,
 
+    pub const Kind = enum { file, directory };
+    pub const Entry = struct {
+        name: []const u8,
+        data: []const u8,
+        kind: Kind,
+    };
+
     pub fn init(bytes: []const u8) Archive {
         return .{ .bytes = bytes };
     }
 
     pub fn find(self: Archive, wanted: []const u8) Error!?[]const u8 {
+        var index: usize = 0;
+        while (try self.entry(index)) |item| : (index += 1) {
+            if (equalBytes(item.name, wanted)) return item.data;
+        }
+        return null;
+    }
+
+    /// Returns the indexed archive record. All returned slices borrow the
+    /// archive, and parsing uses no allocator or mutable index.
+    pub fn entry(self: Archive, wanted_index: usize) Error!?Entry {
         var offset: usize = 0;
+        var index: usize = 0;
         while (offset < self.bytes.len) {
             const header_end = add(offset, 110) catch return error.Overflow;
             if (header_end > self.bytes.len) return error.Truncated;
@@ -49,7 +67,12 @@ pub const Archive = struct {
                 if (file_size != 0) return error.InvalidHeader;
                 return null;
             }
-            if (equalBytes(name, wanted)) return self.bytes[data_start..data_end];
+            if (index == wanted_index) return .{
+                .name = name,
+                .data = self.bytes[data_start..data_end],
+                .kind = if (fields[1] & 0xf000 == 0x4000) .directory else .file,
+            };
+            index += 1;
             offset = try align4(data_end);
             if (offset > self.bytes.len) return error.Truncated;
         }
@@ -122,6 +145,12 @@ test "newc finds aligned files and reports absence at trailer" {
     try appendEntry(&bytes, std.testing.allocator, "USER1.ELF", "payload");
     try appendEntry(&bytes, std.testing.allocator, "TRAILER!!!", "");
     const archive = Archive.init(bytes.items);
+    const first = (try archive.entry(0)).?;
+    try std.testing.expectEqualStrings("a", first.name);
+    try std.testing.expectEqualStrings("x", first.data);
+    try std.testing.expectEqual(Archive.Kind.file, first.kind);
+    try std.testing.expectEqualStrings("USER1.ELF", (try archive.entry(1)).?.name);
+    try std.testing.expect((try archive.entry(2)) == null);
     try std.testing.expectEqualStrings("payload", (try archive.find("USER1.ELF")).?);
     try std.testing.expect((try archive.find("missing")) == null);
 }

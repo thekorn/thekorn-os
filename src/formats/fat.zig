@@ -29,6 +29,17 @@ pub const FileSystem = struct {
     root_cluster: u32,
     cluster_count: u32,
 
+    pub const Entry = struct {
+        name: [12]u8 = @splat(0),
+        name_len: u8,
+        is_directory: bool,
+        size: u32,
+
+        pub fn nameSlice(self: *const Entry) []const u8 {
+            return self.name[0..self.name_len];
+        }
+    };
+
     pub fn mount(device: block.BlockDevice) Error!FileSystem {
         if (device.block_size != 512) return error.InvalidBpb;
         var sector: [512]u8 = undefined;
@@ -81,86 +92,159 @@ pub const FileSystem = struct {
     }
 
     pub fn readFile(self: FileSystem, name: []const u8, destination: []u8) Error![]u8 {
-        var short: [11]u8 = undefined;
-        try shortName(name, &short);
-        const entry = try self.findEntry(&short);
+        const entry = try self.find(name);
         const size: usize = entry.size;
         if (destination.len < size) return error.BufferTooSmall;
-        if (size == 0) return destination[0..0];
+        const amount = try self.readAtEntry(entry, 0, destination[0..size]);
+        if (amount != size) return error.TruncatedChain;
+        return destination[0..size];
+    }
+
+    pub fn stat(self: FileSystem, name: []const u8) Error!Entry {
+        return self.find(name);
+    }
+
+    /// Reads only sectors intersecting the requested range. FAT links are
+    /// followed while skipping preceding clusters, so fragmented files and
+    /// large offsets do not require a whole-file buffer.
+    pub fn readAt(self: FileSystem, name: []const u8, offset: u64, destination: []u8) Error!usize {
+        return self.readAtEntry(try self.find(name), offset, destination);
+    }
+
+    pub fn rootEntry(self: FileSystem, wanted_index: usize) Error!?Entry {
+        var iterator = RootIterator{ .file_system = self };
+        var index: usize = 0;
+        while (try iterator.next()) |raw| {
+            if (index == wanted_index) return publicEntry(raw);
+            index += 1;
+        }
+        return null;
+    }
+
+    const RawEntry = struct { short_name: [11]u8, cluster: u32, size: u32, is_directory: bool };
+
+    fn find(self: FileSystem, name: []const u8) Error!RawEntry {
+        var short: [11]u8 = undefined;
+        try shortName(name, &short);
+        var iterator = RootIterator{ .file_system = self };
+        while (try iterator.next()) |entry| {
+            if (equalShortName(&entry.short_name, &short)) return entry;
+        }
+        return error.NotFound;
+    }
+
+    fn readAtEntry(self: FileSystem, entry: RawEntry, offset: u64, destination: []u8) Error!usize {
+        if (entry.is_directory) return error.InvalidName;
+        if (offset >= entry.size or destination.len == 0) return 0;
         if (entry.cluster < 2) return error.CorruptChain;
+        const available: usize = @intCast(@as(u64, entry.size) - offset);
+        const wanted = @min(destination.len, available);
+        const cluster_bytes: u64 = @as(u64, self.sectors_per_cluster) * 512;
 
         var cluster = entry.cluster;
-        var copied: usize = 0;
+        var skip_clusters = offset / cluster_bytes;
         var visited: u32 = 0;
+        while (skip_clusters > 0) : (skip_clusters -= 1) {
+            try self.validateCluster(cluster);
+            if (visited >= self.cluster_count) return error.ChainLoop;
+            visited += 1;
+            const next = try self.nextCluster(cluster);
+            if (next == cluster) return error.ChainLoop;
+            cluster = next;
+        }
+
+        var within_cluster: usize = @intCast(offset % cluster_bytes);
+        var copied: usize = 0;
         var sector: [512]u8 = undefined;
-        while (copied < size) {
+        while (copied < wanted) {
             try self.validateCluster(cluster);
             if (visited >= self.cluster_count) return error.ChainLoop;
             visited += 1;
             const first = try self.clusterSector(cluster);
-            for (0..self.sectors_per_cluster) |within| {
-                try self.device.read(first + within, &sector);
-                const amount = @min(size - copied, sector.len);
-                @memcpy(destination[copied .. copied + amount], sector[0..amount]);
+            var sector_index = within_cluster / 512;
+            var within_sector = within_cluster % 512;
+            while (sector_index < self.sectors_per_cluster and copied < wanted) : (sector_index += 1) {
+                try self.device.read(first + sector_index, &sector);
+                const amount = @min(wanted - copied, 512 - within_sector);
+                @memcpy(destination[copied .. copied + amount], sector[within_sector .. within_sector + amount]);
                 copied += amount;
-                if (copied == size) return destination[0..size];
+                within_sector = 0;
             }
-            const next = self.nextCluster(cluster) catch |err| switch (err) {
-                error.TruncatedChain => return error.TruncatedChain,
-                else => return err,
-            };
+            if (copied == wanted) return copied;
+            const next = try self.nextCluster(cluster);
             if (next == cluster) return error.ChainLoop;
             cluster = next;
+            within_cluster = 0;
         }
         unreachable;
     }
 
-    const Entry = struct { cluster: u32, size: u32 };
+    const RootIterator = struct {
+        file_system: FileSystem,
+        sector_index: u32 = 0,
+        entry_index: u8 = 0,
+        cluster: u32 = 0,
+        visited: u32 = 0,
+        sector: [512]u8 = undefined,
+        loaded: bool = false,
+        done: bool = false,
 
-    fn findEntry(self: FileSystem, wanted: *const [11]u8) Error!Entry {
-        if (self.fat_type == .fat16) {
-            var sector: [512]u8 = undefined;
-            for (0..self.root_sectors) |i| {
-                try self.device.read(self.root_start + i, &sector);
-                if (scanSector(&sector, wanted)) |result| return result.entry orelse return error.NotFound;
+        fn next(self: *RootIterator) Error!?RawEntry {
+            while (!self.done) {
+                if (!self.loaded) try self.loadSector();
+                if (self.done) return null;
+                const item = self.sector[@as(usize, self.entry_index) * 32 ..][0..32];
+                self.entry_index += 1;
+                if (self.entry_index == 16) {
+                    self.entry_index = 0;
+                    self.loaded = false;
+                    self.sector_index += 1;
+                }
+                if (item[0] == 0) {
+                    self.done = true;
+                    return null;
+                }
+                const attributes = item[11];
+                if (item[0] == 0xe5 or attributes == 0x0f or (attributes & 0x08) != 0) continue;
+                var name: [11]u8 = undefined;
+                @memcpy(&name, item[0..11]);
+                return .{
+                    .short_name = name,
+                    .cluster = (@as(u32, le16(item[20..22])) << 16) | le16(item[26..28]),
+                    .size = le32(item[28..32]),
+                    .is_directory = attributes & 0x10 != 0,
+                };
             }
-            return error.NotFound;
+            return null;
         }
-        var cluster = self.root_cluster;
-        var visited: u32 = 0;
-        var sector: [512]u8 = undefined;
-        while (true) {
-            try self.validateCluster(cluster);
-            if (visited >= self.cluster_count) return error.ChainLoop;
-            visited += 1;
-            const first = try self.clusterSector(cluster);
-            for (0..self.sectors_per_cluster) |i| {
-                try self.device.read(first + i, &sector);
-                if (scanSector(&sector, wanted)) |result| return result.entry orelse return error.NotFound;
-            }
-            cluster = self.nextCluster(cluster) catch |err| switch (err) {
-                error.TruncatedChain => return error.NotFound,
-                else => return err,
-            };
-        }
-    }
 
-    const ScanResult = struct { entry: ?Entry };
-
-    fn scanSector(sector: *const [512]u8, wanted: *const [11]u8) ?ScanResult {
-        for (0..16) |index| {
-            const item = sector[index * 32 ..][0..32];
-            if (item[0] == 0) return .{ .entry = null };
-            const attributes = item[11];
-            if (item[0] == 0xe5 or attributes == 0x0f or (attributes & 0x08) != 0) continue;
-            if (equalShortName(item[0..11], wanted)) {
-                const high: u32 = le16(item[20..22]);
-                const low: u32 = le16(item[26..28]);
-                return .{ .entry = .{ .cluster = (high << 16) | low, .size = le32(item[28..32]) } };
+        fn loadSector(self: *RootIterator) Error!void {
+            if (self.file_system.fat_type == .fat16) {
+                if (self.sector_index >= self.file_system.root_sectors) {
+                    self.done = true;
+                    return;
+                }
+                try self.file_system.device.read(self.file_system.root_start + self.sector_index, &self.sector);
+            } else {
+                if (self.cluster == 0) self.cluster = self.file_system.root_cluster;
+                if (self.sector_index >= self.file_system.sectors_per_cluster) {
+                    if (self.visited >= self.file_system.cluster_count) return error.ChainLoop;
+                    self.visited += 1;
+                    self.cluster = self.file_system.nextCluster(self.cluster) catch |err| switch (err) {
+                        error.TruncatedChain => {
+                            self.done = true;
+                            return;
+                        },
+                        else => return err,
+                    };
+                    self.sector_index = 0;
+                }
+                try self.file_system.validateCluster(self.cluster);
+                try self.file_system.device.read(try self.file_system.clusterSector(self.cluster) + self.sector_index, &self.sector);
             }
+            self.loaded = true;
         }
-        return null;
-    }
+    };
 
     fn clusterSector(self: FileSystem, cluster: u32) Error!u64 {
         const relative = std.math.mul(u64, cluster - 2, self.sectors_per_cluster) catch return error.Overflow;
@@ -194,6 +278,26 @@ pub const FileSystem = struct {
         return value;
     }
 };
+
+fn publicEntry(raw: FileSystem.RawEntry) FileSystem.Entry {
+    var result = FileSystem.Entry{
+        .name_len = 0,
+        .is_directory = raw.is_directory,
+        .size = raw.size,
+    };
+    var length: usize = 8;
+    while (length > 0 and raw.short_name[length - 1] == ' ') length -= 1;
+    @memcpy(result.name[0..length], raw.short_name[0..length]);
+    var extension_length: usize = 3;
+    while (extension_length > 0 and raw.short_name[8 + extension_length - 1] == ' ') extension_length -= 1;
+    if (extension_length > 0) {
+        result.name[length] = '.';
+        @memcpy(result.name[length + 1 ..][0..extension_length], raw.short_name[8..][0..extension_length]);
+        length += extension_length + 1;
+    }
+    result.name_len = @intCast(length);
+    return result;
+}
 
 fn equalShortName(first: *const [11]u8, second: *const [11]u8) bool {
     // Disk structures are byte-aligned, and EL1 enables alignment checks.
@@ -315,6 +419,15 @@ test "FAT16 and FAT32 read a fragmented short-name file" {
         try std.testing.expectEqual(@as(usize, 700), contents.len);
         for (contents[0..512]) |byte| try std.testing.expectEqual(@as(u8, 'A'), byte);
         for (contents[512..]) |byte| try std.testing.expectEqual(@as(u8, 'B'), byte);
+        const root_entry = (try file_system.rootEntry(0)).?;
+        try std.testing.expectEqualStrings("USER1.ELF", root_entry.nameSlice());
+        try std.testing.expectEqual(@as(u32, 700), root_entry.size);
+        try std.testing.expect((try file_system.rootEntry(1)) == null);
+        var partial: [32]u8 = undefined;
+        try std.testing.expectEqual(@as(usize, partial.len), try file_system.readAt("USER1.ELF", 500, &partial));
+        for (partial[0..12]) |byte| try std.testing.expectEqual(@as(u8, 'A'), byte);
+        for (partial[12..]) |byte| try std.testing.expectEqual(@as(u8, 'B'), byte);
+        try std.testing.expectEqual(@as(usize, 0), try file_system.readAt("USER1.ELF", 700, &partial));
         try std.testing.expectError(error.BufferTooSmall, file_system.readFile("USER1.ELF", output[0..699]));
         try std.testing.expectError(error.InvalidName, file_system.readFile("TOO-LONG-NAME.ELF", &output));
     }

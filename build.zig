@@ -202,6 +202,15 @@ pub fn build(b: *std.Build) void {
         },
     });
     const test_step = b.step("test", "Run tests");
+    const vfs_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/vfs_test.zig"),
+            .target = b.graph.host,
+            .optimize = if (coverage) .Debug else optimize,
+        }),
+        .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
+    });
+    test_step.dependOn(&b.addRunArtifact(vfs_tests).step);
     const rpi_block_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/platform/rpi4/emmc.zig"),
