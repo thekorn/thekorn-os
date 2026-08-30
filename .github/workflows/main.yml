@@ -58,6 +58,9 @@ jobs:
       - name: Run unit tests
         run: nix develop --command zig build test
 
+      - name: Report test coverage
+        run: nix develop --command zig-cov test --format=github --include=src/ --exclude=src/test_runner.zig
+
       - name: Build Raspberry Pi 4 image
         run: nix develop --command zig build
 

@@ -18,18 +18,18 @@ pub const ErrorCode = enum(i64) {
 };
 
 pub fn decode(raw_number: u64) ?Number {
-    if (raw_number < @intFromEnum(Number.write) or raw_number > @intFromEnum(Number.grow)) return null;
-    return @enumFromInt(raw_number);
+    if (raw_number < @backingInt(Number.write) or raw_number > @backingInt(Number.grow)) return null;
+    return @fromBackingInt(@intCast(raw_number));
 }
 
 pub fn errorResult(code: ErrorCode) u64 {
-    return @bitCast(-@intFromEnum(code));
+    return @bitCast(-@backingInt(code));
 }
 
 test "ABI version is encoded in every syscall number" {
     const version_mask = @as(u64, 0xff) << version_shift;
     for (std.enums.values(Number)) |number| {
-        try std.testing.expectEqual(abi_version << version_shift, @intFromEnum(number) & version_mask);
+        try std.testing.expectEqual(abi_version << version_shift, @backingInt(number) & version_mask);
     }
 }
 

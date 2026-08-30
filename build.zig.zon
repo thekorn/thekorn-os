@@ -2,7 +2,7 @@
     .name = .thekorn_os,
     .version = "0.0.0",
     .fingerprint = 0x7e9689beb9516d0,
-    .minimum_zig_version = "0.17.0-dev.1415+64dfaa568",
+    .minimum_zig_version = "0.17.0-dev.1933+e19a73c2d",
     .dependencies = .{
         .zlinter = .{
             .url = "git+https://github.com/KurtWagner/zlinter#b716e412619129c0a418b52f8ff2c524deb7120d",

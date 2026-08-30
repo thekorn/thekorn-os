@@ -172,16 +172,15 @@ Run host-native tests:
 nix develop --command zig build test
 ```
 
-Collect host-native test coverage with kcov:
+Collect and summarize host-native test coverage with zig-cov:
 
 ```sh
-nix develop --command zig build test -Dcoverage
+nix develop --command zig-cov test --include=src/ --exclude=src/test_runner.zig
 ```
 
-The command prints overall and per-file coverage, including uncovered line
-numbers, and writes an HTML report to `zig-out/coverage/index.html`. The Nix
-shell provides kcov on Linux; on macOS, install it separately with
-`brew install kcov`.
+zig-cov instruments all host test executables with the Zig LLVM fuzz-coverage
+backend and merges their results. It also supports LCOV, HTML, JSON, Cobertura,
+and GitHub Actions output formats; run `zig-cov --help` for report options.
 
 The custom test runner prints each test's status and duration, followed by a
 summary and the five slowest tests. Set `TEST_VERBOSE=false` for compact output,

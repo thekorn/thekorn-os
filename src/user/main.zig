@@ -46,7 +46,7 @@ pub export fn _start() callconv(.c) noreturn {
 }
 
 fn invoke(number: syscall.Number, argument0: u64, argument1: u64) u64 {
-    return invokeRaw(@intFromEnum(number), argument0, argument1);
+    return invokeRaw(@backingInt(number), argument0, argument1);
 }
 
 fn invokeRaw(number: u64, argument0: u64, argument1: u64) u64 {
