@@ -4,10 +4,10 @@
     pname = "zig-cov";
     version = "0.1.0";
     src = inputs.zcov;
-    nativeBuildInputs = [zig] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+    nativeBuildInputs = [zig] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
       pkgs.autoPatchelfHook
     ];
-    buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [
+    buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
       pkgs.glibc
     ];
     dontConfigure = true;
