@@ -1,5 +1,5 @@
 {pkgs, inputs, ...}: let
-  zig = pkgs.zigpkgs."master-2026-08-28";
+  zig = pkgs.zigpkgs."master-2026-09-20";
   zig-cov = pkgs.stdenv.mkDerivation {
     pname = "zig-cov";
     version = "0.1.0";
