@@ -274,7 +274,7 @@ pub fn deadlineReached(now: usize, deadline: usize) bool {
 }
 
 fn disableLocalIrq() u64 {
-    if (comptime builtin.cpu.arch != .aarch64) return 0;
+    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .freestanding) return 0;
     const state = asm volatile (
         \\mrs %[state], DAIF
         \\msr DAIFSet, #2
@@ -285,7 +285,7 @@ fn disableLocalIrq() u64 {
 }
 
 fn restoreLocalIrq(state: u64) void {
-    if (comptime builtin.cpu.arch != .aarch64) return;
+    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .freestanding) return;
     asm volatile ("msr DAIF, %[state]"
         :
         : [state] "r" (state),

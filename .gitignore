@@ -4,3 +4,4 @@ zig-out/
 .devenv/
 .direnv/
 .amp/portals/*
+coverage.html
