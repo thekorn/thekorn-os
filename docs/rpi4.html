@@ -479,7 +479,7 @@
             <table>
               <thead><tr><th>Job</th><th>Tool or artifact</th><th>State today</th></tr></thead>
               <tbody>
-                <tr><td>Build AArch64 kernel</td><td><code>nix develop --command zig build</code></td><td><span class="status ready">Available</span></td></tr>
+                <tr><td>Build AArch64 kernel</td><td><code>devenv shell -- zig build</code></td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Produce Pi raw kernel</td><td><code>zig-out/kernel8.img</code>, linked at <code>0x80000</code></td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Produce flashable card image</td><td><code>zig-out/thekorn-os-rpi4.img</code></td><td><span class="status ready">Available</span></td></tr>
                 <tr><td>Test portable path</td><td><code>zig build smoke-virt</code> on QEMU <code>virt</code></td><td><span class="status ready">Available</span></td></tr>
@@ -492,8 +492,8 @@
 
           <div class="command">
             <span class="command-label">Build both targets and validate QEMU</span>
-            <pre><code>nix develop --command zig build
-nix develop --command zig build smoke-virt
+            <pre><code>devenv shell -- zig build
+devenv shell -- zig build smoke-virt
 ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
             <button class="copy-button" type="button" aria-label="Copy build commands">Copy</button>
           </div>
@@ -541,7 +541,7 @@ ls -lh zig-out/thekorn-os-rpi4.img</code></pre>
               <span class="step-number">1</span>
               <div>
                 <h3>Build the card image</h3>
-                <p>Run <code>nix develop --command zig build</code> and confirm that <code>zig-out/thekorn-os-rpi4.img</code> exists.</p>
+                <p>Run <code>devenv shell -- zig build</code> and confirm that <code>zig-out/thekorn-os-rpi4.img</code> exists.</p>
               </div>
             </article>
             <article class="step">

@@ -1,0 +1,15 @@
+inputs:
+  nixpkgs:
+    url: github:NixOS/nixpkgs/nixos-unstable
+  zig-overlay:
+    url: github:mitchellh/zig-overlay
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
+    overlays:
+      - default
+  zcov:
+    url: github:ericsssan/zcov/d5b606ab43b31fbf4ba88b6484be95cb03747de2
+    flake: false
+  zls:
+    url: github:zigtools/zls/master

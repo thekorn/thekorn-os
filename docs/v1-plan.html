@@ -545,10 +545,10 @@
           </div>
           <div class="command">
             <span>Target build interface — exact names added with their milestone</span>
-            <pre><code>nix develop --command zig build test
-nix develop --command zig build smoke-v0
-nix develop --command zig build smoke-v1
-nix develop --command zig build stress-v1</code></pre>
+            <pre><code>devenv shell -- zig build test
+devenv shell -- zig build smoke-v0
+devenv shell -- zig build smoke-v1
+devenv shell -- zig build stress-v1</code></pre>
           </div>
           <p class="caption">Keep serial markers sparse and state-based: <code>V1:INIT</code>, <code>V1:SHELL_READY</code>, <code>V1:STRESS_OK</code>, and <code>V1:INTERACTIVE_OK</code>. Command output itself remains human-readable.</p>
         </section>

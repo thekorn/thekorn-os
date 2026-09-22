@@ -14,7 +14,7 @@ image=${2:-zig-out/thekorn-os-rpi4.img}
 
 if [[ ! -f "$image" ]]; then
   echo "flash-rpi4-sd: image not found: $image" >&2
-  echo "flash-rpi4-sd: build it with: nix develop --command zig build" >&2
+  echo "flash-rpi4-sd: build it with: devenv shell -- zig build" >&2
   exit 1
 fi
 

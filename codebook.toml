@@ -129,6 +129,7 @@ words = [
     "cov",
     "cvac",
     "deinit",
+    "devenv",
     "dialout",
     "diskutil",
     "dma",
@@ -137,6 +138,7 @@ words = [
     "endm",
     "equ",
     "eret",
+    "ericsssan",
     "fba",
     "fixup",
     "flashable",
@@ -225,9 +227,12 @@ words = [
     "xffffff",
     "xzr",
     "zcov",
+    "mitchellh",
+    "nixos",
     "zigpkgs",
+    "zigtools",
     "zlinter",
     "zls",
     "zon",
 ]
-ignore_paths = ["flake.lock"]
+ignore_paths = ["devenv.lock", ".devenv/**"]

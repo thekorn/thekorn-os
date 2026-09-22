@@ -7,6 +7,7 @@ nix_profile="$HOME/.nix-profile"
 echo "==> Ensuring Nix installation prerequisites are available"
 missing_packages=()
 command -v curl >/dev/null 2>&1 || missing_packages+=(curl)
+command -v jq >/dev/null 2>&1 || missing_packages+=(jq)
 command -v xz >/dev/null 2>&1 || missing_packages+=(xz-utils)
 test -r /etc/ssl/certs/ca-certificates.crt || missing_packages+=(ca-certificates)
 if ((${#missing_packages[@]})); then
@@ -39,22 +40,31 @@ if ! grep -Eq '^[[:space:]]*experimental-features[[:space:]]*=.*(^|[[:space:]])f
   printf '%s\n' 'experimental-features = nix-command flakes' >> "$nix_config"
 fi
 
-profile_marker="# thekorn-os Nix development shell"
+echo "==> Installing devenv from locked nixpkgs"
+nixpkgs_rev="$(jq -r .nodes.nixpkgs.locked.rev "$repo_root/devenv.lock")"
+nix profile install "github:NixOS/nixpkgs/$nixpkgs_rev#devenv"
+
+# Remove the former flake activation block when reusing an older orb snapshot.
+if [[ -f "$HOME/.bash_profile" ]]; then
+  sed -i '/^# thekorn-os Nix development shell$/,/^fi$/d' "$HOME/.bash_profile"
+fi
+
+profile_marker="# thekorn-os devenv development environment"
 if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
   echo "==> Configuring the repository development environment for login shells"
   cat >> "$HOME/.bash_profile" <<EOF
 
 $profile_marker
-if [[ -z "\${IN_NIX_SHELL:-}" && "\${PWD}" == "$repo_root" ]]; then
+if [[ -z "\${DEVENV_ROOT:-}" && "\${PWD}" == "$repo_root" ]]; then
   if [[ -f "$nix_profile/etc/profile.d/nix.sh" ]]; then
     source "$nix_profile/etc/profile.d/nix.sh"
   fi
-  eval "\$("$nix_profile/bin/nix" print-dev-env "$repo_root")"
+  eval "\$("$nix_profile/bin/devenv" print-dev-env)"
 fi
 EOF
 fi
 
-echo "==> Realizing the locked development shell"
-nix develop "$repo_root" --command zig build --fetch
+echo "==> Realizing the locked devenv environment"
+(cd "$repo_root" && devenv shell -- zig build --fetch)
 
 echo "==> Orb setup complete"

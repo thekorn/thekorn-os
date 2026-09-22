@@ -39,19 +39,24 @@ growth and is preempted during the same 1,000-tick timer run.
 ## Requirements
 
 - Nix with flakes enabled
-- A platform supported by `flake.nix` (`aarch64-darwin`, `aarch64-linux`, or
-  `x86_64-linux`)
+- [devenv](https://devenv.sh/getting-started/) 2.1.2 or newer
+- `aarch64-darwin`, `aarch64-linux`, or `x86_64-linux`
 
-The Nix flake supplies the pinned compiler and host tools on
-`aarch64-darwin`, `aarch64-linux`, and `x86_64-linux`. Zig fetches packaged
+`devenv.nix` defines the compiler and host tools; `devenv.yaml` declares their
+inputs and `devenv.lock` pins their revisions. Nix remains the underlying
+package manager. Zig fetches packaged
 project inputs from `build.zig.zon` into `zig-pkg/`; the Pi image build also
 downloads the matching board DTB from the pinned firmware tag and verifies its
 SHA-256 digest before use.
 
+Enter an interactive environment with `devenv shell`, or use the one-shot
+commands below. Run `devenv update` only when intentionally updating the
+locked development dependencies.
+
 ## Build
 
 ```sh
-nix develop --command zig build
+devenv shell -- zig build
 ```
 
 The default build uses `ReleaseSmall` code generation while retaining symbols
@@ -69,7 +74,7 @@ Write `zig-out/thekorn-os-rpi4.img` to a spare microSD card from the command
 line with:
 
 ```sh
-nix develop --command bash scripts/flash-rpi4-sd.sh DEVICE
+devenv shell -- bash scripts/flash-rpi4-sd.sh DEVICE
 ```
 
 Use the whole removable disk as `DEVICE`, not one of its partitions. On macOS,
@@ -97,7 +102,7 @@ Actions artifact named with the commit SHA.
 An optimization mode can be selected explicitly, for example:
 
 ```sh
-nix develop --command zig build -Doptimize=ReleaseSmall
+devenv shell -- zig build -Doptimize=ReleaseSmall
 ```
 
 ## Run and verify
@@ -105,13 +110,13 @@ nix develop --command zig build -Doptimize=ReleaseSmall
 Lint the Zig source:
 
 ```sh
-nix develop --command zig build lint
+devenv shell -- zig build lint
 ```
 
 Run the kernel interactively on QEMU `virt`:
 
 ```sh
-nix develop --command zig build run-virt
+devenv shell -- zig build run-virt
 ```
 
 The normal build now selects the v1 boot profile. It shares platform, memory,
@@ -120,14 +125,14 @@ life cycles, and validates interrupt-driven terminal input before emitting
 `V1:INIT`. The frozen v0 self-test remains available as a regression gate:
 
 ```sh
-nix develop --command zig build smoke-v0
-nix develop --command zig build smoke-v1
+devenv shell -- zig build smoke-v0
+devenv shell -- zig build smoke-v1
 ```
 
 To show the serial output in the QEMU graphical virtual console instead, run:
 
 ```sh
-nix develop --command zig build run-virt-gui
+devenv shell -- zig build run-virt-gui
 ```
 
 Switch to the serial console with Ctrl+Alt+2 (Ctrl+Option+2 on macOS).
@@ -135,7 +140,7 @@ Switch to the serial console with Ctrl+Alt+2 (Ctrl+Option+2 on macOS).
 Run the timeout-bounded serial smoke test:
 
 ```sh
-nix develop --command zig build smoke-virt
+devenv shell -- zig build smoke-virt
 ```
 
 `smoke-virt` is retained as an alias for `smoke-v0`.
@@ -144,7 +149,7 @@ Check the Pi image, DTB handoff, UART, memory discovery, and EMMC2 error path
 on the QEMU `raspi4b` machine:
 
 ```sh
-nix develop --command zig build smoke-raspi4b
+devenv shell -- zig build smoke-raspi4b
 ```
 
 QEMU 11 attaches its emulated SD card to the legacy Pi controller rather than
@@ -159,7 +164,7 @@ After writing the generated image to a card and connecting a 3.3 V serial
 adapter, validate the complete physical-hardware marker contract with:
 
 ```sh
-nix develop --command bash scripts/smoke-rpi4-serial.sh /dev/ttyUSB0
+devenv shell -- bash scripts/smoke-rpi4-serial.sh /dev/ttyUSB0
 ```
 
 Pass an optional transcript path and timeout in seconds as the second and third
@@ -169,13 +174,13 @@ selection, flashing, and Pi power control remain manual.
 Run host-native tests:
 
 ```sh
-nix develop --command zig build test
+devenv shell -- zig build test
 ```
 
 Collect and summarize host-native test coverage with zig-cov:
 
 ```sh
-nix develop --command zig-cov test --include=src/ --exclude=src/test_runner.zig
+devenv shell -- zig-cov test --include=src/ --exclude=src/test_runner.zig
 ```
 
 zig-cov instruments all host test executables with the Zig LLVM fuzz-coverage
@@ -219,7 +224,7 @@ the transition.
 Start QEMU paused with a GDB-compatible server on TCP port `1234`:
 
 ```sh
-nix develop --command zig build debug-virt
+devenv shell -- zig build debug-virt
 ```
 
 Then connect an AArch64-capable debugger to `localhost:1234` and load
@@ -231,8 +236,8 @@ graphics-enabled kernel, attaches a modern MMIO virtio-gpu device, renders the
 800 × 600 boot scene, and presents it on scanout 0:
 
 ```sh
-nix develop --command zig build run-virt-graphics
-nix develop --command zig build smoke-virt-graphics
+devenv shell -- zig build run-virt-graphics
+devenv shell -- zig build smoke-virt-graphics
 ```
 
 The smoke gate waits for the serial success marker, captures the scanout through

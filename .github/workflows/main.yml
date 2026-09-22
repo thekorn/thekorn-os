@@ -21,48 +21,51 @@ jobs:
       - name: Cache Nix store
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('devenv.nix', 'devenv.yaml', 'devenv.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-linux: 2G
+
+      - name: Install devenv from locked nixpkgs
+        run: nix profile install "github:NixOS/nixpkgs/$(jq -r .nodes.nixpkgs.locked.rev devenv.lock)#devenv"
 
       - name: Cache Zig build artifacts
         uses: actions/cache@v6
         with:
           path: .zig-cache
-          key: zig-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon') }}-${{ github.sha }}
+          key: zig-${{ runner.os }}-${{ hashFiles('devenv.lock', 'build.zig.zon') }}-${{ github.sha }}
           restore-keys: |
-            zig-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon') }}-
+            zig-${{ runner.os }}-${{ hashFiles('devenv.lock', 'build.zig.zon') }}-
             zig-${{ runner.os }}-
 
       - name: Cache Zig packages
         uses: actions/cache@v6
         with:
           path: zig-pkg
-          key: zig-pkg-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon') }}
+          key: zig-pkg-${{ runner.os }}-${{ hashFiles('devenv.lock', 'build.zig.zon') }}
 
       - name: Check spelling
-        run: nix develop --command codebook-lsp lint --unique -s .
+        run: devenv shell -- codebook-lsp lint --unique -s .
 
       - name: Lint Zig source
-        run: nix develop --command zig build lint
+        run: devenv shell -- zig build lint
 
       - name: Run QEMU virt smoke test
-        run: nix develop --command zig build smoke-virt
+        run: devenv shell -- zig build smoke-virt
 
       - name: Run QEMU Raspberry Pi 4 smoke test
-        run: nix develop --command zig build smoke-raspi4b
+        run: devenv shell -- zig build smoke-raspi4b
 
       - name: Run QEMU graphics smoke test
-        run: nix develop --command zig build smoke-virt-graphics
+        run: devenv shell -- zig build smoke-virt-graphics
 
       - name: Run unit tests
-        run: nix develop --command zig build test
+        run: devenv shell -- zig build test
 
       - name: Report test coverage
-        run: nix develop --command zig-cov test --format=github --include=src/ --exclude=src/test_runner.zig
+        run: devenv shell -- zig-cov test --format=github --include=src/ --exclude=src/test_runner.zig
 
       - name: Build Raspberry Pi 4 image
-        run: nix develop --command zig build
+        run: devenv shell -- zig build
 
       - name: Upload Raspberry Pi 4 image
         uses: actions/upload-artifact@v7

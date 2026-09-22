@@ -371,7 +371,7 @@
           <div class="timeline">
             <article class="milestone foundation">
               <div class="phase-label">Phase 0</div><div class="rail"><span class="dot"></span></div>
-              <div class="milestone-body"><span class="status recommended">Complete · 3e5c91e</span><h3>Freestanding build and reproducible toolchain</h3><p>Pin the Zig development snapshot in Nix, resolve an <code>aarch64-freestanding-none</code> target, add a linker script at <code>0x80000</code>, put <code>_start</code> first, create a 16-byte-aligned stack, clear BSS, preserve the DTB pointer from <code>x0</code>, and emit both symbol-rich ELF and <code>kernel8.img</code>. Use small external assembly files only where exact instruction layout matters.</p><div class="tags"><span class="tag">build.zig</span><span class="tag">linker.ld</span><span class="tag">boot.S</span><span class="tag">flake.nix</span></div><div class="exit"><strong>Exit verified:</strong> QEMU reaches Zig <code>kernelMain</code>; LLDB resolves symbols and breaks at <code>_start</code> and <code>kernelMain</code>.</div></div>
+              <div class="milestone-body"><span class="status recommended">Complete · 3e5c91e</span><h3>Freestanding build and reproducible toolchain</h3><p>Pin the Zig development snapshot in devenv, resolve an <code>aarch64-freestanding-none</code> target, add a linker script at <code>0x80000</code>, put <code>_start</code> first, create a 16-byte-aligned stack, clear BSS, preserve the DTB pointer from <code>x0</code>, and emit both symbol-rich ELF and <code>kernel8.img</code>. Use small external assembly files only where exact instruction layout matters.</p><div class="tags"><span class="tag">build.zig</span><span class="tag">linker.ld</span><span class="tag">boot.S</span><span class="tag">devenv.nix</span></div><div class="exit"><strong>Exit verified:</strong> QEMU reaches Zig <code>kernelMain</code>; LLDB resolves symbols and breaks at <code>_start</code> and <code>kernelMain</code>.</div></div>
             </article>
             <article class="milestone foundation">
               <div class="phase-label">Phase 1</div><div class="rail"><span class="dot"></span></div>
@@ -420,7 +420,7 @@
           <div class="section-heading"><span class="section-number">05</span><h2>Let the repository grow along ownership lines</h2></div>
           <p class="section-intro">This is a target shape, not a request to create empty scaffolding. Add a path only in the phase that first needs it.</p>
           <div class="file-grid">
-            <article class="card file-card"><span class="file-label">build.zig · build.zig.zon · flake.nix</span><h3>Build graph and tools</h3><ul><li>Freestanding kernel and native-test modules.</li><li>ELF, raw image, run, debug, and smoke steps.</li><li>Pinned Zig and QEMU through Nix.</li></ul></article>
+            <article class="card file-card"><span class="file-label">build.zig · build.zig.zon · devenv.nix</span><h3>Build graph and tools</h3><ul><li>Freestanding kernel and native-test modules.</li><li>ELF, raw image, run, debug, and smoke steps.</li><li>Pinned Zig and QEMU through devenv.</li></ul></article>
             <article class="card file-card"><span class="file-label">src/arch/aarch64/</span><h3>CPU mechanisms</h3><ul><li>Boot/EL transition and vector assembly.</li><li>System registers, barriers, context frames.</li><li>Translation-table primitives.</li></ul></article>
             <article class="card file-card"><span class="file-label">src/kernel/</span><h3>Portable policy</h3><ul><li>Panic, scheduler, process, syscall.</li><li>Physical/virtual memory ownership.</li><li>No board register constants.</li></ul></article>
             <article class="card file-card"><span class="file-label">src/platform/qemu_virt/ · src/platform/rpi4/</span><h3>Board support</h3><ul><li>Platform composition and address maps.</li><li>Console, GIC configuration, block devices.</li><li>Firmware/DTB hand-off details.</li></ul></article>
@@ -429,11 +429,11 @@
             <article class="card file-card"><span class="file-label">tools/ · scripts/</span><h3>Repeatable operations</h3><ul><li>Disk-image creation and QEMU/physical serial smoke tests.</li><li>Generate <code>zig-out/thekorn-os-rpi4.img</code> with firmware, config, kernel, license, and manifest.</li><li>No automated SD-device flashing or power control in v0.</li></ul></article>
           </div>
           <div class="command">
-            <span class="command-label">Planned development commands — all through the Nix shell</span>
-            <pre><code>nix develop --command zig build test
-nix develop --command zig build run-virt
-nix develop --command zig build smoke-virt
-nix develop --command zig build debug-virt</code></pre>
+            <span class="command-label">Planned development commands — all through devenv</span>
+            <pre><code>devenv shell -- zig build test
+devenv shell -- zig build run-virt
+devenv shell -- zig build smoke-virt
+devenv shell -- zig build debug-virt</code></pre>
           </div>
           <p class="caption">Verify exact Zig 0.17 development APIs against the pinned compiler before implementing each build step; online Zig bare-bones examples age quickly.</p>
         </section>
@@ -496,7 +496,7 @@ nix develop --command zig build debug-virt</code></pre>
           <p class="section-intro">All criteria for the coherent v0 are met on QEMU and physical Raspberry Pi 4.</p>
           <div class="definition">
             <ul class="checklist complete">
-              <li>Nix shell reproduces the pinned Zig/QEMU build.</li>
+              <li>devenv reproduces the pinned Zig/QEMU build.</li>
               <li>ELF, <code>kernel8.img</code>, and a flashable Pi card image are generated.</li>
               <li>QEMU smoke test is deterministic and timeout-bounded.</li>
               <li>Phase 2 serial/exception gate passes on a physical Pi 4.</li>

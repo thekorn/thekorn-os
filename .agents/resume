@@ -8,3 +8,11 @@ if [[ ! -x "$nix" ]]; then
 fi
 
 echo "Nix is available: $("$nix" --version)"
+
+devenv="$HOME/.nix-profile/bin/devenv"
+if [[ ! -x "$devenv" ]]; then
+  echo "devenv is unavailable; rerun .agents/setup" >&2
+  exit 1
+fi
+
+echo "devenv is available: $("$devenv" --version)"
