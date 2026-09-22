@@ -8,8 +8,8 @@
   "lsp": {
     "zls": {
       "binary": {
-        "path": "nix",
-        "arguments": ["develop", "--command", "zls"],
+        "path": "devenv",
+        "arguments": ["shell", "--", "zls"],
       },
     },
   },

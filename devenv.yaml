@@ -1,15 +1,19 @@
+# yaml-language-server: $schema=https://devenv.sh/devenv.schema.json
 inputs:
   nixpkgs:
     url: github:NixOS/nixpkgs/nixos-unstable
+  zcov:
+    url: github:ericsssan/zcov
+    flake: false
   zig-overlay:
     url: github:mitchellh/zig-overlay
     inputs:
       nixpkgs:
         follows: nixpkgs
-    overlays:
-      - default
-  zcov:
-    url: github:ericsssan/zcov/d5b606ab43b31fbf4ba88b6484be95cb03747de2
-    flake: false
   zls:
-    url: github:zigtools/zls/master
+    url: github:zigtools/zls
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
+      zig-overlay:
+        follows: zig-overlay

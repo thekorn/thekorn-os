@@ -1,10 +1,9 @@
-{pkgs, inputs, ...}: let
-  zig = pkgs.zigpkgs."master-2026-09-20";
+{pkgs, inputs, config, ...}: let
   zig-cov = pkgs.stdenv.mkDerivation {
     pname = "zig-cov";
     version = "0.1.0";
     src = inputs.zcov;
-    nativeBuildInputs = [zig] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+    nativeBuildInputs = [config.languages.zig.package] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
       pkgs.autoPatchelfHook
     ];
     buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
@@ -20,6 +19,11 @@
     '';
   };
 in {
+  languages.zig = {
+    enable = true;
+    version = "master-2026-09-20";
+  };
+
   packages = [
     pkgs.codebook
     pkgs.coreutils
@@ -28,8 +32,6 @@ in {
     pkgs.python3
     pkgs.qemu
     pkgs.which
-    zig
     zig-cov
-    inputs.zls.packages.${pkgs.stdenv.hostPlatform.system}.zls
   ];
 }

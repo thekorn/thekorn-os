@@ -43,7 +43,10 @@ growth and is preempted during the same 1,000-tick timer run.
 - `aarch64-darwin`, `aarch64-linux`, or `x86_64-linux`
 
 `devenv.nix` defines the compiler and host tools; `devenv.yaml` declares their
-inputs and `devenv.lock` pins their revisions. Nix remains the underlying
+inputs and `devenv.lock` pins their revisions. The `languages.zig` module selects
+the dated Zig development build from the `zig-overlay` input without applying
+its overlay to nixpkgs. ZLS stays on an explicit `master` input because the
+module's inferred ZLS release tags only suit numeric Zig releases. Nix remains the underlying
 package manager. Zig fetches packaged
 project inputs from `build.zig.zon` into `zig-pkg/`; the Pi image build also
 downloads the matching board DTB from the pinned firmware tag and verifies its
